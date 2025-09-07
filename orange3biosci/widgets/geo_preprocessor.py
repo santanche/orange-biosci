@@ -3,12 +3,13 @@ from Orange.data import Table, Domain, ContinuousVariable, StringVariable
 from Orange.widgets import widget, gui, settings
 from Orange.widgets.utils.signals import Input, Output
 from Orange.widgets.widget import Msg
+from pkg_resources import resource_filename
 
 class OWGeoPreprocessor(widget.OWWidget):
     # Widget metadata
     name = "GEO Preprocessor"
     description = "Preprocess GEO gene differential expression data."
-    icon = "icons/preprocessing-icon.svg"
+    icon = resource_filename(__name__, "../icons/preprocessing-icon.svg")
     priority = 100
     keywords = ["GEO", "gene", "expression", "preprocess"]
 

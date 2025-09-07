@@ -1,7 +1,9 @@
+from pkg_resources import resource_filename
+
 # Widgets are registered by category. Let's put it in "Transform"
 NAME = "BioSci"
 DESCRIPTION = "Collection of Bio Science processing widgets."
-ICON = "icons/biosci-category-icon.svg"
+ICON = resource_filename(__name__, "../icons/biosci-category-icon.svg")
 BACKGROUND = "#9FFFBD"
 
 PRIORITY = 3
