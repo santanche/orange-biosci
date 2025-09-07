@@ -1,0 +1,445 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 48 48"
+   version="1.1"
+   id="svg44"
+   sodipodi:docname="preprocessing-icon.svg"
+   width="48"
+   height="48"
+   inkscape:version="1.4.2 (ebf0e940d0, 2025-05-08)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs44" />
+  <sodipodi:namedview
+     id="namedview44"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:zoom="8.11"
+     inkscape:cx="19.667078"
+     inkscape:cy="2.8976572"
+     inkscape:window-width="1850"
+     inkscape:window-height="1016"
+     inkscape:window-x="1990"
+     inkscape:window-y="27"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg44" />
+  <!-- Raw Data Matrix (left side - with missing spots) -->
+  <!-- Processing Arrow -->
+  <!-- Processed Data Matrix (right side) -->
+  <g
+     id="g47"
+     transform="matrix(0.74418605,0,0,0.74418605,0,9.488372)">
+    <g
+       id="g45"
+       transform="translate(-9.5,-29.5)">
+      <g
+         transform="translate(10,30)"
+         id="g22">
+        <!-- Data matrix representation with missing data -->
+        <rect
+           x="0"
+           y="0"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect1" />
+        <!-- Missing spot -->
+        <rect
+           x="7"
+           y="0"
+           width="5"
+           height="5"
+           fill="none"
+           stroke="#cccccc"
+           stroke-width="1"
+           stroke-dasharray="1, 1"
+           rx="0.5"
+           id="rect2" />
+        <rect
+           x="14"
+           y="0"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect3" />
+        <rect
+           x="21"
+           y="0"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect4" />
+        <rect
+           x="0"
+           y="7"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect5" />
+        <rect
+           x="7"
+           y="7"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect6" />
+        <!-- Missing spot -->
+        <rect
+           x="14"
+           y="7"
+           width="5"
+           height="5"
+           fill="none"
+           stroke="#cccccc"
+           stroke-width="1"
+           stroke-dasharray="1, 1"
+           rx="0.5"
+           id="rect7" />
+        <rect
+           x="21"
+           y="7"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect8" />
+        <!-- Missing spot -->
+        <rect
+           x="0"
+           y="14"
+           width="5"
+           height="5"
+           fill="none"
+           stroke="#cccccc"
+           stroke-width="1"
+           stroke-dasharray="1, 1"
+           rx="0.5"
+           id="rect9" />
+        <rect
+           x="7"
+           y="14"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect10" />
+        <rect
+           x="14"
+           y="14"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect11" />
+        <rect
+           x="21"
+           y="14"
+           width="5"
+           height="5"
+           fill="#999999"
+           rx="0.5"
+           id="rect12" />
+        <rect
+           x="0"
+           y="21"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect13" />
+        <!-- Missing spot -->
+        <rect
+           x="7"
+           y="21"
+           width="5"
+           height="5"
+           fill="none"
+           stroke="#cccccc"
+           stroke-width="1"
+           stroke-dasharray="1, 1"
+           rx="0.5"
+           id="rect14" />
+        <rect
+           x="14"
+           y="21"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect15" />
+        <rect
+           x="21"
+           y="21"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect16" />
+        <!-- Expression level bars with gaps -->
+        <rect
+           x="2"
+           y="30"
+           width="2"
+           height="8"
+           fill="#333333"
+           rx="0.5"
+           id="rect17" />
+        <!-- Missing bar -->
+        <rect
+           x="6"
+           y="32"
+           width="2"
+           height="6"
+           fill="none"
+           stroke="#cccccc"
+           stroke-width="1"
+           stroke-dasharray="1, 1"
+           rx="0.5"
+           id="rect18" />
+        <rect
+           x="10"
+           y="28"
+           width="2"
+           height="10"
+           fill="#333333"
+           rx="0.5"
+           id="rect19" />
+        <rect
+           x="14"
+           y="31"
+           width="2"
+           height="7"
+           fill="#999999"
+           rx="0.5"
+           id="rect20" />
+        <!-- Missing bar -->
+        <rect
+           x="18"
+           y="29"
+           width="2"
+           height="9"
+           fill="none"
+           stroke="#cccccc"
+           stroke-width="1"
+           stroke-dasharray="1, 1"
+           rx="0.5"
+           id="rect21" />
+        <rect
+           x="22"
+           y="33"
+           width="2"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect22" />
+      </g>
+    </g>
+    <g
+       transform="translate(27.25339,15.5)"
+       id="g23">
+      <path
+         d="M 0,5 H 8 L 6,2 10,8 6,14 8,11 H 0 Z"
+         fill="#333333"
+         id="path22" />
+    </g>
+    <g
+       id="g46"
+       transform="translate(-21.5,-29.5)">
+      <g
+         transform="translate(60,30)"
+         id="g44">
+        <!-- Data matrix representation -->
+        <rect
+           x="0"
+           y="0"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect23" />
+        <rect
+           x="7"
+           y="0"
+           width="5"
+           height="5"
+           fill="#999999"
+           rx="0.5"
+           id="rect24" />
+        <rect
+           x="14"
+           y="0"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect25" />
+        <rect
+           x="21"
+           y="0"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect26" />
+        <rect
+           x="0"
+           y="7"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect27" />
+        <rect
+           x="7"
+           y="7"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect28" />
+        <rect
+           x="14"
+           y="7"
+           width="5"
+           height="5"
+           fill="#999999"
+           rx="0.5"
+           id="rect29" />
+        <rect
+           x="21"
+           y="7"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect30" />
+        <rect
+           x="0"
+           y="14"
+           width="5"
+           height="5"
+           fill="#999999"
+           rx="0.5"
+           id="rect31" />
+        <rect
+           x="7"
+           y="14"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect32" />
+        <rect
+           x="14"
+           y="14"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect33" />
+        <rect
+           x="21"
+           y="14"
+           width="5"
+           height="5"
+           fill="#999999"
+           rx="0.5"
+           id="rect34" />
+        <rect
+           x="0"
+           y="21"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect35" />
+        <rect
+           x="7"
+           y="21"
+           width="5"
+           height="5"
+           fill="#999999"
+           rx="0.5"
+           id="rect36" />
+        <rect
+           x="14"
+           y="21"
+           width="5"
+           height="5"
+           fill="#666666"
+           rx="0.5"
+           id="rect37" />
+        <rect
+           x="21"
+           y="21"
+           width="5"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect38" />
+        <!-- Expression level bars -->
+        <rect
+           x="2"
+           y="30"
+           width="2"
+           height="8"
+           fill="#333333"
+           rx="0.5"
+           id="rect39" />
+        <rect
+           x="6"
+           y="32"
+           width="2"
+           height="6"
+           fill="#666666"
+           rx="0.5"
+           id="rect40" />
+        <rect
+           x="10"
+           y="28"
+           width="2"
+           height="10"
+           fill="#333333"
+           rx="0.5"
+           id="rect41" />
+        <rect
+           x="14"
+           y="31"
+           width="2"
+           height="7"
+           fill="#999999"
+           rx="0.5"
+           id="rect42" />
+        <rect
+           x="18"
+           y="29"
+           width="2"
+           height="9"
+           fill="#666666"
+           rx="0.5"
+           id="rect43" />
+        <rect
+           x="22"
+           y="33"
+           width="2"
+           height="5"
+           fill="#333333"
+           rx="0.5"
+           id="rect44" />
+      </g>
+    </g>
+  </g>
+</svg>
