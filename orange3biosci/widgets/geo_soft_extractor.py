@@ -23,7 +23,7 @@ class OWGeoSoftExtractor(OWWidget):
 
     # Widget settings
     soft_file_path = Setting("")
-    sample_substring = Setting("")
+    sample_substrings = Setting("")
     transform_log2 = Setting(True)
     
     # Outputs
@@ -72,7 +72,7 @@ class OWGeoSoftExtractor(OWWidget):
         file_box.layout().addWidget(self.load_samples_button)
         
         # Sample substring input
-        gui.lineEdit(left_panel, self, "sample_substring", "Sample Substrings:", 
+        gui.lineEdit(left_panel, self, "sample_substrings", "Sample Substrings:", 
                      callback=self.on_substring_changed)
         
         # Log2 transform checkbox
@@ -131,13 +131,13 @@ class OWGeoSoftExtractor(OWWidget):
             # Use the first meaningful word (skip common prefixes)
             for word in words:
                 if len(word) > 3 and word.lower() not in ['sample', 'gsm', 'title']:
-                    self.sample_substring = word
+                    self.sample_substrings = word
                     break
             else:
                 # If no good word found, use first word
-                self.sample_substring = words[0]
+                self.sample_substrings = words[0]
         
-        self.log_message(f"Selected substring: '{self.sample_substring}' from sample: {sample_text}")
+        self.log_message(f"Selected substring: '{self.sample_substrings}' from sample: {sample_text}")
 
     def load_sample_titles(self):
         """Load and display all sample titles from the SOFT file"""
@@ -337,7 +337,7 @@ class OWGeoSoftExtractor(OWWidget):
         
         return platform_data
 
-    def parse_soft_file_directly(self, filename, substring):
+    def parse_soft_file_directly(self, filename, substrings):
         """Parse SOFT file directly to extract sample info and expression data"""
         matching_samples = {}
         sample_characteristics = {}
@@ -345,6 +345,8 @@ class OWGeoSoftExtractor(OWWidget):
         current_sample_title = None
         in_sample_table = False
         sample_data = defaultdict(dict)
+
+        substring_list = [s.strip() for s in substrings.lower().split(',') if s.strip()]
         
         try:
             with open(filename, 'r') as f:
@@ -360,9 +362,14 @@ class OWGeoSoftExtractor(OWWidget):
                     # Get sample title/description
                     elif current_sample and line.startswith('!Sample_title'):
                         title = line.split('=')[1].strip() if '=' in line else ""
-                        if substring.lower() in title.lower():
+                        if len(substring_list) == 0:
                             current_sample_title = title
-                            self.log_message(f"Found matching sample: {current_sample} - {title}")
+                            self.log_message(f"Found sample: {current_sample} - {title}")
+                        else:
+                            for substring in substring_list:
+                                if substring.lower() in title.lower():
+                                    current_sample_title = title
+                                    self.log_message(f"Found matching sample: {current_sample} - {title}")
                             
                     # Get sample characteristics
                     elif current_sample and current_sample_title and line.startswith('!Sample_characteristics_ch1'):
@@ -405,13 +412,13 @@ class OWGeoSoftExtractor(OWWidget):
             self.log_message("Please select a valid SOFT file")
             return
             
-        if not self.sample_substring.strip():
-            self.log_message("Please enter a sample substring")
-            return
+        # if not self.sample_substrings.strip():
+        #     self.log_message("Please enter a sample substring")
+        #     return
 
         # Clear previous results
         self.log_area.clear()
-        self.log_message(f"Parsing SOFT file for samples containing '{self.sample_substring}'...")
+        self.log_message(f"Parsing SOFT file for samples containing '{self.sample_substrings}'...")
         
         # First, parse platform data for Entrez IDs
         self.log_message("Parsing platform annotation data...")
@@ -422,10 +429,10 @@ class OWGeoSoftExtractor(OWWidget):
         self.highlight_matching_samples()
         
         # Parse the file
-        expression_data, sample_characteristics = self.parse_soft_file_directly(self.soft_file_path, self.sample_substring)
+        expression_data, sample_characteristics = self.parse_soft_file_directly(self.soft_file_path, self.sample_substrings)
         
         if not expression_data:
-            self.log_message(f"No samples found containing substring '{self.sample_substring}'")
+            self.log_message(f"No samples found containing substring '{self.sample_substrings}'")
             self.Outputs.data.send(None)
             return
         
@@ -449,19 +456,26 @@ class OWGeoSoftExtractor(OWWidget):
 
     def highlight_matching_samples(self):
         """Highlight samples in the list that match the current substring"""
-        if not self.sample_substring.strip():
-            return
+        # if not self.sample_substrings.strip():
+        #     return
             
-        substring_lower = self.sample_substring.lower()
-        
+        substring_lower = self.sample_substrings.lower()
+        substrings = [s.strip() for s in substring_lower.split(',') if s.strip()]
+
+        self.log_message(f"Parsing {len(substrings)} sample substrings")
+
         for i in range(self.sample_list.count()):
             item = self.sample_list.item(i)
-            if substring_lower in item.text().lower():
+            item.setBackground(item.listWidget().palette().base())
+            item.setForeground(item.listWidget().palette().text())
+            if len(substrings) == 0:
                 item.setBackground(item.listWidget().palette().highlight())
                 item.setForeground(item.listWidget().palette().highlightedText())
             else:
-                item.setBackground(item.listWidget().palette().base())
-                item.setForeground(item.listWidget().palette().text())
+                for ss in substrings:
+                    if ss in item.text().lower():
+                        item.setBackground(item.listWidget().palette().highlight())
+                        item.setForeground(item.listWidget().palette().highlightedText())
 
     def create_orange_table(self, expression_data, all_genes, sample_characteristics):
         """Convert expression data to Orange Table format"""
