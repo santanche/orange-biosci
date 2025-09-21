@@ -38,6 +38,7 @@ class OWGeoSoftExtractor(OWWidget):
         # Internal variables
         self.expression_data = None
         self.all_sample_titles = []
+        self.platform_data = {}  # Store platform annotation data
 
     def setup_gui(self):
         # Main layout with splitter
@@ -185,12 +186,86 @@ class OWGeoSoftExtractor(OWWidget):
     def log_message(self, message):
         self.log_area.append(message)
         self.log_area.repaint()
-        self.log_area.append(message)
-        self.log_area.repaint()
+
+    def parse_platform_data(self, filename):
+        """Extract platform annotation data from SOFT file"""
+        platform_data = {}
+        current_platform = None
+        in_platform_table = False
+        header_indices = {}
+        
+        try:
+            with open(filename, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    
+                    # Check for platform start
+                    if line.startswith('^PLATFORM'):
+                        current_platform = line.split('=')[1].strip() if '=' in line else None
+                        in_platform_table = False
+                        header_indices = {}
+                        
+                    # Check for platform table start
+                    elif current_platform and line.startswith('!platform_table_begin'):
+                        in_platform_table = True
+                        continue
+                        
+                    # Check for platform table end
+                    elif line.startswith('!platform_table_end'):
+                        in_platform_table = False
+                        
+                    # Parse platform table header
+                    elif in_platform_table and current_platform and line.startswith('#'):
+                        headers = line[1:].split('\t')  # Remove # and split
+                        for idx, header in enumerate(headers):
+                            header_indices[header.strip().lower()] = idx
+                        
+                    # Parse platform table data
+                    elif in_platform_table and current_platform and line and not line.startswith('!') and not line.startswith('#'):
+                        parts = line.split('\t')
+                        if len(parts) > 0:
+                            probe_id = parts[0]
+                            entrez_id = None
+                            
+                            # Look for Entrez ID in different possible columns
+                            for field_name in ['gene', 'geneid', 'gene_assignment']:
+                                if field_name in header_indices:
+                                    col_idx = header_indices[field_name]
+                                    if col_idx < len(parts) and parts[col_idx]:
+                                        value = parts[col_idx]
+                                        
+                                        if field_name == 'gene_assignment':
+                                            # For gene_assignment, take the 5th value separated by //
+                                            assignment_parts = value.split('//')
+                                            if len(assignment_parts) >= 5:
+                                                entrez_candidate = assignment_parts[4].strip()
+                                                # Extract first value if multiple values separated by ///
+                                                if '///' in entrez_candidate:
+                                                    entrez_candidate = entrez_candidate.split('///')[0].strip()
+                                                if entrez_candidate and entrez_candidate.isdigit():
+                                                    entrez_id = entrez_candidate
+                                                    break
+                                        else:
+                                            # For GENE or GeneID fields
+                                            # Extract first value if multiple values separated by ///
+                                            if '///' in value:
+                                                value = value.split('///')[0].strip()
+                                            if value and value.isdigit():
+                                                entrez_id = value
+                                                break
+                            
+                            if entrez_id:
+                                platform_data[probe_id] = entrez_id
+                                
+        except Exception as e:
+            self.log_message(f"Error parsing platform data: {str(e)}")
+        
+        return platform_data
 
     def parse_soft_file_directly(self, filename, substring):
         """Parse SOFT file directly to extract sample info and expression data"""
         matching_samples = {}
+        sample_characteristics = {}
         current_sample = None
         current_sample_title = None
         in_sample_table = False
@@ -214,6 +289,13 @@ class OWGeoSoftExtractor(OWWidget):
                             current_sample_title = title
                             self.log_message(f"Found matching sample: {current_sample} - {title}")
                             
+                    # Get sample characteristics
+                    elif current_sample and current_sample_title and line.startswith('!Sample_characteristics_ch1'):
+                        characteristics = line.split('=')[1].strip() if '=' in line else ""
+                        if current_sample not in sample_characteristics:
+                            sample_characteristics[current_sample] = []
+                        sample_characteristics[current_sample].append(characteristics)
+                        
                     # Check for table start
                     elif current_sample and current_sample_title and line.startswith('!sample_table_begin'):
                         in_sample_table = True
@@ -239,9 +321,9 @@ class OWGeoSoftExtractor(OWWidget):
                                     continue
         except Exception as e:
             self.log_message(f"Error parsing file: {str(e)}")
-            return {}
+            return {}, {}
         
-        return matching_samples
+        return matching_samples, sample_characteristics
 
     def extract_data(self):
         if not self.soft_file_path or not os.path.exists(self.soft_file_path):
@@ -256,11 +338,16 @@ class OWGeoSoftExtractor(OWWidget):
         self.log_area.clear()
         self.log_message(f"Parsing SOFT file for samples containing '{self.sample_substring}'...")
         
+        # First, parse platform data for Entrez IDs
+        self.log_message("Parsing platform annotation data...")
+        self.platform_data = self.parse_platform_data(self.soft_file_path)
+        self.log_message(f"Found Entrez IDs for {len(self.platform_data)} probes")
+        
         # Highlight matching samples in the list
         self.highlight_matching_samples()
         
         # Parse the file
-        expression_data = self.parse_soft_file_directly(self.soft_file_path, self.sample_substring)
+        expression_data, sample_characteristics = self.parse_soft_file_directly(self.soft_file_path, self.sample_substring)
         
         if not expression_data:
             self.log_message(f"No samples found containing substring '{self.sample_substring}'")
@@ -283,7 +370,7 @@ class OWGeoSoftExtractor(OWWidget):
             return
         
         # Create Orange Table
-        self.create_orange_table(expression_data, all_genes)
+        self.create_orange_table(expression_data, all_genes, sample_characteristics)
 
     def highlight_matching_samples(self):
         """Highlight samples in the list that match the current substring"""
@@ -301,18 +388,29 @@ class OWGeoSoftExtractor(OWWidget):
                 item.setBackground(item.listWidget().palette().base())
                 item.setForeground(item.listWidget().palette().text())
 
-    def create_orange_table(self, expression_data, all_genes):
+    def create_orange_table(self, expression_data, all_genes, sample_characteristics):
         """Convert expression data to Orange Table format"""
         
         # Create domain
         # Each sample becomes a feature (column)
         sample_names = list(expression_data.keys())
         
-        # Create continuous variables for each sample
-        attributes = [ContinuousVariable(sample_name) for sample_name in sample_names]
+        # Create continuous variables for each sample with characteristics as labels
+        attributes = []
+        for sample_name in sample_names:
+            var = ContinuousVariable(sample_name)
+            
+            # Add sample characteristics as variable attributes
+            if sample_name in sample_characteristics:
+                characteristics = sample_characteristics[sample_name]
+                # Join all characteristics with semicolon
+                char_string = "; ".join(characteristics)
+                var.attributes = {"characteristics": char_string}
+            
+            attributes.append(var)
         
-        # Gene ID as meta attribute
-        metas = [StringVariable("Gene_ID")]
+        # Gene ID as "genes" and Entrez ID as meta attributes
+        metas = [StringVariable("genes"), StringVariable("Entrez ID")]
         
         domain = Domain(attributes, metas=metas)
         
@@ -330,14 +428,24 @@ class OWGeoSoftExtractor(OWWidget):
                 if gene_id in sample_data:
                     X[gene_idx, sample_idx] = sample_data[gene_id]
         
-        # Create meta data (gene IDs)
+        # Create meta data (gene IDs and Entrez IDs)
         gene_ids = np.array(all_genes).reshape(-1, 1)
+        entrez_ids = []
+        
+        for gene_id in all_genes:
+            entrez_id = self.platform_data.get(gene_id, "")
+            entrez_ids.append(entrez_id)
+        
+        entrez_ids = np.array(entrez_ids).reshape(-1, 1)
+        metas_data = np.hstack([gene_ids, entrez_ids])
         
         # Create Orange Table
-        table = Table.from_numpy(domain, X, metas=gene_ids)
+        table = Table.from_numpy(domain, X, metas=metas_data)
         
         self.log_message(f"Created Orange Table: {n_genes} genes x {n_samples} samples")
         self.log_message(f"Non-missing values: {np.count_nonzero(~np.isnan(X))}")
+        entrez_count = np.count_nonzero([e for e in entrez_ids.flatten() if e])
+        self.log_message(f"Genes with Entrez IDs: {entrez_count}")
         
         # Send the table to output
         self.Outputs.data.send(table)
@@ -346,3 +454,4 @@ class OWGeoSoftExtractor(OWWidget):
 # For testing the widget
 if __name__ == "__main__":
     WidgetPreview(OWGeoSoftExtractor).run()
+    
