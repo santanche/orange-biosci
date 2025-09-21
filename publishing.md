@@ -1,9 +1,5 @@
 # Publishing
 
-~~~bash
-pip install build twine
-~~~
-
 # Install build tools
 ~~~bash
 pip install build twine

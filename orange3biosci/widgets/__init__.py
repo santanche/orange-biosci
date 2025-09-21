@@ -11,6 +11,7 @@ PRIORITY = 3
 WIDGETS = [
     # The class name and a friendly name for its menu entry
     'OWGeoPreprocessor',
+    'OWGeoSoftExtractor'
 ]
 
 # The .py file where each widget is implemented
