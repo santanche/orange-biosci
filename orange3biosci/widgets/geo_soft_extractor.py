@@ -23,9 +23,8 @@ class OWGeoSoftExtractor(OWWidget):
 
     # Widget settings
     soft_file_path = Setting("")
-    sample_substring = Setting("Basal")
-    table_name = Setting("GEO Expression Data")
-    transform_log2 = Setting(False)
+    sample_substring = Setting("")
+    transform_log2 = Setting(True)
     
     # Outputs
     class Outputs:
@@ -73,11 +72,8 @@ class OWGeoSoftExtractor(OWWidget):
         file_box.layout().addWidget(self.load_samples_button)
         
         # Sample substring input
-        gui.lineEdit(left_panel, self, "sample_substring", "Sample Substring:", 
-                    callback=self.on_substring_changed)
-        
-        # Table name input
-        gui.lineEdit(left_panel, self, "table_name", "Output Table Name:")
+        gui.lineEdit(left_panel, self, "sample_substring", "Sample Substrings:", 
+                     callback=self.on_substring_changed)
         
         # Log2 transform checkbox
         gui.checkBox(left_panel, self, "transform_log2", "Transform log2 to actual values",
@@ -192,16 +188,13 @@ class OWGeoSoftExtractor(OWWidget):
     def on_substring_changed(self):
         pass  # Settings are automatically saved
 
-    def on_table_name_changed(self):
-        pass  # Settings are automatically saved
-
     def on_transform_changed(self):
         pass  # Settings are automatically saved
 
     def parse_sample_characteristics(self, characteristics_list):
         """Parse sample characteristics into label-value pairs"""
         parsed_chars = {}
-        class_chars = ''
+        # class_chars = ''
         
         for char_line in characteristics_list:
             # Each characteristic is typically in format "label: value"
@@ -213,14 +206,16 @@ class OWGeoSoftExtractor(OWWidget):
                     # Clean up common label variations
                     label = label.replace(' ', '_').lower()
                     parsed_chars[label] = value
-                    class_chars += value + ('|' if len(class_chars) > 0 else '')
+                    # class_chars += ('|' if len(class_chars) > 0 else '') +value
             else:
                 # If no colon, treat the whole thing as a characteristic
                 # Use a generic label with index
                 generic_label = f"characteristic_{len(parsed_chars)}"
                 parsed_chars[generic_label] = char_line.strip()
 
-        parsed_chars['class'] = class_chars
+        parsed_chars['class'] = '|'.join([parsed_chars[k] for k in sorted(parsed_chars.keys())])
+
+        # parsed_chars['class'] = class_chars
 
         return parsed_chars
 
@@ -235,11 +230,17 @@ class OWGeoSoftExtractor(OWWidget):
         in_platform_table = False
         in_table_header = False
         header_indices = {}
+
+        self.table_name = "GEO Expression Data"
+        self.taxonomy_id = "9606"  # Default to human
         
         try:
             with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
                     line = line.strip()
+
+                    if line.startswith('^SERIES'):
+                        self.table_name = line.split('=')[1].strip() if '=' in line else None
                     
                     # Check for platform start
                     if line.startswith('^PLATFORM'):
@@ -248,7 +249,10 @@ class OWGeoSoftExtractor(OWWidget):
                         in_table_header = False
                         header_indices = {}
                         self.log_message(f"Found platform: {current_platform}")
-                        
+
+                    if line.startswith('!Series_platform_taxid'):
+                        self.taxonomy_id = line.split('=')[1].strip() if '=' in line else self.taxonomy_id
+
                     # Check for platform table start
                     elif current_platform and line.startswith('!platform_table_begin'):
                         in_platform_table = True
@@ -263,7 +267,6 @@ class OWGeoSoftExtractor(OWWidget):
                         
                     # Parse platform table header
                     elif in_platform_table and current_platform and in_table_header:
-                        # headers = line[1:].split('\t')  # Remove # and split
                         headers = line.split('\t')
                         in_table_header = False
                         for idx, header in enumerate(headers):
@@ -527,11 +530,16 @@ class OWGeoSoftExtractor(OWWidget):
         table = Table.from_numpy(domain, X, metas=metas_data)
         
         # Set the table name
-        if self.table_name.strip():
-            table.name = self.table_name.strip()
+        if self.table_name:
+            table.name = self.table_name
         else:
             table.name = "GEO Expression Data"
-        
+
+        table.attributes = {
+            "taxonomy_id": self.taxonomy_id,
+            "gene_as_attribute_name": False,
+            "gene_id_column": "Entrez ID"
+        }
         self.log_message(f"Created Orange Table '{table.name}': {n_genes} genes x {n_samples} samples")
         self.log_message(f"Non-missing values: {np.count_nonzero(~np.isnan(X))}")
         entrez_count = np.count_nonzero([e for e in entrez_ids.flatten() if e])
