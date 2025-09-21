@@ -183,6 +183,32 @@ class OWGeoSoftExtractor(OWWidget):
     def on_substring_changed(self):
         pass  # Settings are automatically saved
 
+    def parse_sample_characteristics(self, characteristics_list):
+        """Parse sample characteristics into label-value pairs"""
+        parsed_chars = {}
+        class_chars = ''
+        
+        for char_line in characteristics_list:
+            # Each characteristic is typically in format "label: value"
+            if ':' in char_line:
+                parts = char_line.split(':', 1)  # Split only on first colon
+                if len(parts) == 2:
+                    label = parts[0].strip()
+                    value = parts[1].strip()
+                    # Clean up common label variations
+                    label = label.replace(' ', '_').lower()
+                    parsed_chars[label] = value
+                    class_chars += value + ('|' if len(class_chars) > 0 else '')
+            else:
+                # If no colon, treat the whole thing as a characteristic
+                # Use a generic label with index
+                generic_label = f"characteristic_{len(parsed_chars)}"
+                parsed_chars[generic_label] = char_line.strip()
+
+        parsed_chars['class'] = class_chars
+        
+        return parsed_chars
+
     def log_message(self, message):
         self.log_area.append(message)
         self.log_area.repaint()
@@ -192,10 +218,11 @@ class OWGeoSoftExtractor(OWWidget):
         platform_data = {}
         current_platform = None
         in_platform_table = False
+        in_table_header = False
         header_indices = {}
         
         try:
-            with open(filename, 'r') as f:
+            with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
                     line = line.strip()
                     
@@ -203,55 +230,83 @@ class OWGeoSoftExtractor(OWWidget):
                     if line.startswith('^PLATFORM'):
                         current_platform = line.split('=')[1].strip() if '=' in line else None
                         in_platform_table = False
+                        in_table_header = False
                         header_indices = {}
+                        self.log_message(f"Found platform: {current_platform}")
                         
                     # Check for platform table start
                     elif current_platform and line.startswith('!platform_table_begin'):
                         in_platform_table = True
+                        in_table_header = True
+                        self.log_message("Started parsing platform table")
                         continue
                         
                     # Check for platform table end
                     elif line.startswith('!platform_table_end'):
                         in_platform_table = False
+                        self.log_message("Finished parsing platform table")
                         
                     # Parse platform table header
-                    elif in_platform_table and current_platform and line.startswith('#'):
-                        headers = line[1:].split('\t')  # Remove # and split
+                    elif in_platform_table and current_platform and in_table_header:
+                        # headers = line[1:].split('\t')  # Remove # and split
+                        headers = line.split('\t')
+                        in_table_header = False
                         for idx, header in enumerate(headers):
                             header_indices[header.strip().lower()] = idx
+                        self.log_message(f"Platform headers: {list(header_indices.keys())}")
                         
                     # Parse platform table data
                     elif in_platform_table and current_platform and line and not line.startswith('!') and not line.startswith('#'):
                         parts = line.split('\t')
                         if len(parts) > 0:
-                            probe_id = parts[0]
+                            probe_id = parts[0].strip()
                             entrez_id = None
                             
-                            # Look for Entrez ID in different possible columns
-                            for field_name in ['gene', 'geneid', 'gene_assignment']:
+                            # Look for Entrez ID in different possible columns (expanded search)
+                            possible_fields = ['gene', 'geneid', 'entrez_gene_id', 'gene_id', 'ncbi_gene_id', 'gene_assignment']
+                            
+                            for field_name in possible_fields:
                                 if field_name in header_indices:
                                     col_idx = header_indices[field_name]
-                                    if col_idx < len(parts) and parts[col_idx]:
-                                        value = parts[col_idx]
+                                    if col_idx < len(parts) and parts[col_idx].strip():
+                                        value = parts[col_idx].strip()
                                         
                                         if field_name == 'gene_assignment':
-                                            # For gene_assignment, take the 5th value separated by //
+                                            # For gene_assignment, look for Entrez ID in the assignment string
+                                            # Format is often: Symbol // Description // Chromosome // Map Location // Entrez ID // ...
                                             assignment_parts = value.split('//')
-                                            if len(assignment_parts) >= 5:
-                                                entrez_candidate = assignment_parts[4].strip()
-                                                # Extract first value if multiple values separated by ///
-                                                if '///' in entrez_candidate:
-                                                    entrez_candidate = entrez_candidate.split('///')[0].strip()
-                                                if entrez_candidate and entrez_candidate.isdigit():
-                                                    entrez_id = entrez_candidate
+                                            for i, part in enumerate(assignment_parts):
+                                                part = part.strip()
+                                                # Check if this part looks like an Entrez ID (numeric)
+                                                if part and part.isdigit() and len(part) > 2:
+                                                    entrez_id = part
                                                     break
+                                            if entrez_id:
+                                                break
                                         else:
-                                            # For GENE or GeneID fields
-                                            # Extract first value if multiple values separated by ///
+                                            # For other fields, try to extract numeric Entrez ID
+                                            # Handle multiple values separated by /// or ///
                                             if '///' in value:
-                                                value = value.split('///')[0].strip()
-                                            if value and value.isdigit():
-                                                entrez_id = value
+                                                candidates = value.split('///')
+                                            elif '//' in value:
+                                                candidates = value.split('//')
+                                            else:
+                                                candidates = [value]
+                                            
+                                            for candidate in candidates:
+                                                candidate = candidate.strip()
+                                                # Try to extract just the numeric part
+                                                if candidate.isdigit() and len(candidate) > 2:
+                                                    entrez_id = candidate
+                                                    break
+                                                # Sometimes it's in format like "EntrezGene:12345"
+                                                elif ':' in candidate:
+                                                    parts_colon = candidate.split(':')
+                                                    if len(parts_colon) > 1 and parts_colon[1].strip().isdigit():
+                                                        entrez_id = parts_colon[1].strip()
+                                                        break
+                                            
+                                            if entrez_id:
                                                 break
                             
                             if entrez_id:
@@ -259,6 +314,8 @@ class OWGeoSoftExtractor(OWWidget):
                                 
         except Exception as e:
             self.log_message(f"Error parsing platform data: {str(e)}")
+            import traceback
+            self.log_message(f"Traceback: {traceback.format_exc()}")
         
         return platform_data
 
@@ -395,17 +452,20 @@ class OWGeoSoftExtractor(OWWidget):
         # Each sample becomes a feature (column)
         sample_names = list(expression_data.keys())
         
-        # Create continuous variables for each sample with characteristics as labels
+        # Create continuous variables for each sample with parsed characteristics as separate attributes
         attributes = []
         for sample_name in sample_names:
             var = ContinuousVariable(sample_name)
             
-            # Add sample characteristics as variable attributes
+            # Parse sample characteristics into individual label-value pairs
             if sample_name in sample_characteristics:
-                characteristics = sample_characteristics[sample_name]
-                # Join all characteristics with semicolon
-                char_string = "; ".join(characteristics)
-                var.attributes = {"characteristics": char_string}
+                characteristics_list = sample_characteristics[sample_name]
+                parsed_chars = self.parse_sample_characteristics(characteristics_list)
+                
+                # Set each characteristic as a separate variable attribute
+                if parsed_chars:
+                    var.attributes = parsed_chars
+                    self.log_message(f"Sample {sample_name} characteristics: {list(parsed_chars.keys())}")
             
             attributes.append(var)
         
@@ -454,4 +514,3 @@ class OWGeoSoftExtractor(OWWidget):
 # For testing the widget
 if __name__ == "__main__":
     WidgetPreview(OWGeoSoftExtractor).run()
-    
