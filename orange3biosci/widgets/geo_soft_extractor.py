@@ -24,6 +24,8 @@ class OWGeoSoftExtractor(OWWidget):
     # Widget settings
     soft_file_path = Setting("")
     sample_substring = Setting("Basal")
+    table_name = Setting("GEO Expression Data")
+    transform_log2 = Setting(False)
     
     # Outputs
     class Outputs:
@@ -73,6 +75,13 @@ class OWGeoSoftExtractor(OWWidget):
         # Sample substring input
         gui.lineEdit(left_panel, self, "sample_substring", "Sample Substring:", 
                     callback=self.on_substring_changed)
+        
+        # Table name input
+        gui.lineEdit(left_panel, self, "table_name", "Output Table Name:")
+        
+        # Log2 transform checkbox
+        gui.checkBox(left_panel, self, "transform_log2", "Transform log2 to actual values",
+                    callback=self.on_transform_changed)
         
         # Extract button
         self.extract_button = QPushButton("Extract Expression Data")
@@ -183,6 +192,12 @@ class OWGeoSoftExtractor(OWWidget):
     def on_substring_changed(self):
         pass  # Settings are automatically saved
 
+    def on_table_name_changed(self):
+        pass  # Settings are automatically saved
+
+    def on_transform_changed(self):
+        pass  # Settings are automatically saved
+
     def parse_sample_characteristics(self, characteristics_list):
         """Parse sample characteristics into label-value pairs"""
         parsed_chars = {}
@@ -206,7 +221,7 @@ class OWGeoSoftExtractor(OWWidget):
                 parsed_chars[generic_label] = char_line.strip()
 
         parsed_chars['class'] = class_chars
-        
+
         return parsed_chars
 
     def log_message(self, message):
@@ -486,7 +501,16 @@ class OWGeoSoftExtractor(OWWidget):
             sample_data = expression_data[sample_name]
             for gene_idx, gene_id in enumerate(all_genes):
                 if gene_id in sample_data:
-                    X[gene_idx, sample_idx] = sample_data[gene_id]
+                    value = sample_data[gene_id]
+                    # Apply log2 transformation if requested
+                    if self.transform_log2:
+                        try:
+                            # Transform from log2 to actual value: 2^x
+                            value = 2 ** value
+                        except (OverflowError, ValueError):
+                            # Handle potential overflow or invalid values
+                            value = np.nan
+                    X[gene_idx, sample_idx] = value
         
         # Create meta data (gene IDs and Entrez IDs)
         gene_ids = np.array(all_genes).reshape(-1, 1)
@@ -502,10 +526,18 @@ class OWGeoSoftExtractor(OWWidget):
         # Create Orange Table
         table = Table.from_numpy(domain, X, metas=metas_data)
         
-        self.log_message(f"Created Orange Table: {n_genes} genes x {n_samples} samples")
+        # Set the table name
+        if self.table_name.strip():
+            table.name = self.table_name.strip()
+        else:
+            table.name = "GEO Expression Data"
+        
+        self.log_message(f"Created Orange Table '{table.name}': {n_genes} genes x {n_samples} samples")
         self.log_message(f"Non-missing values: {np.count_nonzero(~np.isnan(X))}")
         entrez_count = np.count_nonzero([e for e in entrez_ids.flatten() if e])
         self.log_message(f"Genes with Entrez IDs: {entrez_count}")
+        if self.transform_log2:
+            self.log_message("Applied log2 to actual value transformation (2^x)")
         
         # Send the table to output
         self.Outputs.data.send(table)
