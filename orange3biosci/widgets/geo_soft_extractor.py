@@ -278,6 +278,9 @@ class OWGeoSoftExtractor(OWWidget):
                         parts = line.split('\t')
                         if len(parts) > 0:
                             probe_id = parts[0].strip()
+
+                            platform_data[probe_id] = {}
+
                             entrez_id = None
                             
                             # Look for Entrez ID in different possible columns (expanded search)
@@ -328,8 +331,34 @@ class OWGeoSoftExtractor(OWWidget):
                                                 break
                             
                             if entrez_id:
-                                platform_data[probe_id] = entrez_id
-                                
+                                platform_data[probe_id]['entrez_id'] = entrez_id
+
+                            # Try to find gene symbol in common fields
+                            possible_symbol_fields = ['gene symbol', 'gene_symbol', 'symbol', 'gene', 'gene_assignment', 'gene_name', 'geneid', 'gene_id', 'gene_title']
+                            gene_symbol = None
+                            for symbol_field in possible_symbol_fields:
+                                if symbol_field in header_indices:
+                                    col_idx = header_indices[symbol_field]
+                                    if col_idx < len(parts) and parts[col_idx].strip():
+                                        value = parts[col_idx].strip()
+                                        # For gene_assignment, symbol is often first part before //
+                                        if symbol_field == 'gene_assignment':
+                                            assignment_parts = value.split('//')
+                                            if assignment_parts:
+                                                gene_symbol = assignment_parts[0].strip()
+                                        else:
+                                            if '///' in value:
+                                                candidates = value.split('///')
+                                            elif '//' in value:
+                                                candidates = value.split('//')
+                                            else:
+                                                candidates = [value]
+                                            gene_symbol = candidates[0].strip()
+                                        break
+                            # You can store or use gene_symbol as needed
+                            if gene_symbol:
+                                platform_data[probe_id]['gene_symbol'] = gene_symbol
+
         except Exception as e:
             self.log_message(f"Error parsing platform data: {str(e)}")
             import traceback
@@ -502,7 +531,7 @@ class OWGeoSoftExtractor(OWWidget):
             attributes.append(var)
         
         # Gene ID as "genes" and Entrez ID as meta attributes
-        metas = [StringVariable("genes"), StringVariable("Entrez ID")]
+        metas = [StringVariable("genes"), StringVariable("Entrez ID"), StringVariable("Gene Symbol")]
         
         domain = Domain(attributes, metas=metas)
         
@@ -532,13 +561,18 @@ class OWGeoSoftExtractor(OWWidget):
         # Create meta data (gene IDs and Entrez IDs)
         gene_ids = np.array(all_genes).reshape(-1, 1)
         entrez_ids = []
+        gene_symbols = []
         
         for gene_id in all_genes:
-            entrez_id = self.platform_data.get(gene_id, "")
+            gene_data = self.platform_data.get(gene_id, {})
+            entrez_id = gene_data.get('entrez_id', "")
+            gene_symbol = gene_data.get('gene_symbol', "")
             entrez_ids.append(entrez_id)
+            gene_symbols.append(gene_symbol)
         
         entrez_ids = np.array(entrez_ids).reshape(-1, 1)
-        metas_data = np.hstack([gene_ids, entrez_ids])
+        gene_symbols = np.array(gene_symbols).reshape(-1, 1)
+        metas_data = np.hstack([gene_ids, entrez_ids, gene_symbols])
         
         # Create Orange Table
         table = Table.from_numpy(domain, X, metas=metas_data)
