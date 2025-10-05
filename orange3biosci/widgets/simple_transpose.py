@@ -24,6 +24,7 @@ class OWSimpleTransposeTable(widget.OWWidget):
     # Settings
     column_for_names = Setting(0)  # Index of column to use for names
     use_attribute_names_as_column = Setting(True)
+    auto_apply = Setting(True)  # Automatically apply transpose
     
     # Store the actual column name to restore selection after reload
     _selected_column_name = Setting("")  # Empty string means "generic names"
@@ -45,10 +46,37 @@ class OWSimpleTransposeTable(widget.OWWidget):
         
         gui.checkBox(box, self, "use_attribute_names_as_column",
                      "Add original attribute names as first column",
-                     callback=self.transpose_data)
+                     callback=self.on_settings_changed)
+
+        gui.checkBox(box, self, "auto_apply",
+                     "Apply automatically",
+                     callback=self.on_auto_apply_changed)
+        
+        self.apply_button = gui.button(
+            box, self, "Apply",
+            callback=self.apply_transpose,
+            autoDefault=False
+        )
+        
+        self.update_apply_button_state()
 
         gui.rubber(self.controlArea)
 
+    def on_auto_apply_changed(self):
+        """Called when auto-apply checkbox changes"""
+        self.update_apply_button_state()
+        if self.auto_apply:
+            self.apply_transpose()
+    
+    def update_apply_button_state(self):
+        """Enable/disable apply button based on auto_apply setting"""
+        self.apply_button.setEnabled(not self.auto_apply)
+    
+    def on_settings_changed(self):
+        """Called when settings change"""
+        if self.auto_apply:
+            self.apply_transpose()
+    
     def on_column_selection_changed(self):
         """Called when column selection changes"""
         # Store the name of the selected column for persistence
@@ -57,14 +85,16 @@ class OWSimpleTransposeTable(widget.OWWidget):
         elif self.column_for_names <= len(self.all_vars):
             self._selected_column_name = self.all_vars[self.column_for_names - 1].name
         
-        self.transpose_data()
+        if self.auto_apply:
+            self.apply_transpose()
 
     @Inputs.data
     def set_data(self, data):
         self.data = data
         self.update_column_combo()
         self.restore_column_selection()
-        self.transpose_data()
+        if self.auto_apply:
+            self.apply_transpose()
 
     def update_column_combo(self):
         """Update the combo box with available columns"""
@@ -109,6 +139,10 @@ class OWSimpleTransposeTable(widget.OWWidget):
             # Empty string means generic names (index 0)
             if self.column_for_names > len(self.all_vars):
                 self.column_for_names = 0
+
+    def apply_transpose(self):
+        """Apply the transpose operation"""
+        self.transpose_data()
 
     def transpose_data(self):
         if self.data is None:

@@ -27,6 +27,7 @@ class OWCustomPivot(OWWidget):
     col_var_index = Setting(0)
     val_var_index = Setting(0)
     aggregation = Setting(0)
+    auto_apply = Setting(True)
     
     # Store variable names to restore selection
     row_var_name = Setting("")
@@ -70,7 +71,21 @@ class OWCustomPivot(OWWidget):
             callback=self.on_selection_changed
         )
         
-        gui.button(box, self, "Apply Pivot", callback=self.apply_pivot)
+        # Auto-apply checkbox
+        gui.checkBox(
+            box, self, "auto_apply",
+            label="Apply automatically",
+            callback=self.on_auto_apply_changed
+        )
+        
+        # Manual apply button
+        self.apply_button = gui.button(
+            box, self, "Apply Pivot", 
+            callback=self.apply_pivot
+        )
+        
+        # Set initial button state
+        self.apply_button.setEnabled(not self.auto_apply)
         
         # Info box
         self.info_label = gui.widgetLabel(
@@ -96,6 +111,10 @@ class OWCustomPivot(OWWidget):
                 self.val_var_index = self.var_names.index(self.val_var_name)
             
             self.info_label.setText(f"Input: {len(data)} rows, {len(self.var_names)} columns")
+            
+            # Auto-apply if enabled
+            if self.auto_apply:
+                self.apply_pivot()
         else:
             self.var_names = []
             self.update_combos()
@@ -129,6 +148,18 @@ class OWCustomPivot(OWWidget):
                 self.col_var_name = self.var_names[self.col_var_index]
             if 0 <= self.val_var_index < len(self.var_names):
                 self.val_var_name = self.var_names[self.val_var_index]
+        
+        # Auto-apply if enabled
+        if self.auto_apply:
+            self.apply_pivot()
+    
+    def on_auto_apply_changed(self):
+        # Enable/disable manual apply button based on auto-apply setting
+        self.apply_button.setEnabled(not self.auto_apply)
+        
+        # Apply immediately if auto-apply is turned on
+        if self.auto_apply:
+            self.apply_pivot()
 
     def apply_pivot(self):
         if self.data is None:
