@@ -4,7 +4,7 @@ from Orange.data.pandas_compat import table_to_frame as table_to_pandas
 from Orange.widgets import gui
 from Orange.widgets.settings import Setting
 from Orange.widgets.widget import OWWidget, Input, Output
-from AnyQt.QtWidgets import QVBoxLayout
+from AnyQt.QtWidgets import QVBoxLayout, QListWidget, QAbstractItemView
 from pkg_resources import resource_filename
 
 class OWCustomPivot(OWWidget):
@@ -33,6 +33,9 @@ class OWCustomPivot(OWWidget):
     row_var_name = Setting("")
     col_var_name = Setting("")
     val_var_name = Setting("")
+    
+    # New setting for attribute fields
+    selected_attr_fields = Setting([])
 
     def __init__(self):
         super().__init__()
@@ -71,6 +74,15 @@ class OWCustomPivot(OWWidget):
             callback=self.on_selection_changed
         )
         
+        # New section for column attributes
+        attr_box = gui.widgetBox(self.controlArea, "Column Attributes")
+        gui.widgetLabel(attr_box, "Select fields to attach as column attributes:")
+        
+        self.attr_fields_list = QListWidget()
+        self.attr_fields_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.attr_fields_list.itemSelectionChanged.connect(self.on_attr_fields_changed)
+        attr_box.layout().addWidget(self.attr_fields_list)
+        
         # Auto-apply checkbox
         gui.checkBox(
             box, self, "auto_apply",
@@ -101,6 +113,7 @@ class OWCustomPivot(OWWidget):
             all_vars = list(data.domain.variables) + list(data.domain.metas)
             self.var_names = [var.name for var in all_vars]
             self.update_combos()
+            self.update_attr_fields_list()
             
             # Restore previous selections if variable names match
             if self.row_var_name in self.var_names:
@@ -118,6 +131,7 @@ class OWCustomPivot(OWWidget):
         else:
             self.var_names = []
             self.update_combos()
+            self.update_attr_fields_list()
             self.info_label.setText("No data on input.")
             self.Outputs.data.send(None)
 
@@ -138,6 +152,28 @@ class OWCustomPivot(OWWidget):
                 self.col_var_index = min(1, len(self.var_names) - 1)
             if self.val_var_index >= len(self.var_names):
                 self.val_var_index = min(2, len(self.var_names) - 1)
+
+    def update_attr_fields_list(self):
+        """Update the list of available fields for column attributes"""
+        self.attr_fields_list.clear()
+        
+        if self.var_names:
+            self.attr_fields_list.addItems(self.var_names)
+            
+            # Restore previous selections
+            for i in range(self.attr_fields_list.count()):
+                item = self.attr_fields_list.item(i)
+                if item.text() in self.selected_attr_fields:
+                    item.setSelected(True)
+
+    def on_attr_fields_changed(self):
+        """Handle changes in attribute fields selection"""
+        selected_items = self.attr_fields_list.selectedItems()
+        self.selected_attr_fields = [item.text() for item in selected_items]
+        
+        # Auto-apply if enabled
+        if self.auto_apply:
+            self.apply_pivot()
 
     def on_selection_changed(self):
         # Save variable names when selection changes
@@ -202,6 +238,29 @@ class OWCustomPivot(OWWidget):
                     aggfunc=agg_func
                 )
             
+            # Get attribute values for each column before resetting index
+            column_attributes = {}
+            if self.selected_attr_fields:
+                # For each column in the pivoted result (excluding index)
+                for col_value in pivoted.columns:
+                    # Filter original dataframe for this column value
+                    mask = df[col_var] == col_value
+                    col_attrs = {}
+                    
+                    for field in self.selected_attr_fields:
+                        if field in df.columns:
+                            # Get the first value for this field in the filtered data
+                            field_values = df.loc[mask, field]
+                            if len(field_values) > 0:
+                                first_value = field_values.iloc[0]
+                                # Convert to string, handling different types
+                                if pd.isna(first_value):
+                                    col_attrs[field] = "?"
+                                else:
+                                    col_attrs[field] = str(first_value)
+                    
+                    column_attributes[str(col_value)] = col_attrs
+            
             # Reset index to make row variable a column
             pivoted = pivoted.reset_index()
             
@@ -219,11 +278,19 @@ class OWCustomPivot(OWWidget):
             for idx, col in enumerate(pivoted.columns):
                 if pivoted[col].dtype == 'object' or pivoted[col].dtype.name == 'category':
                     # String or categorical column - store as meta
-                    metas.append(StringVariable(col))
+                    var = StringVariable(col)
+                    metas.append(var)
                     meta_indices.append(idx)
                 else:
                     # Numerical column - store as attribute
-                    attributes.append(ContinuousVariable(col))
+                    var = ContinuousVariable(col)
+                    
+                    # Add attributes to the variable if this column has them
+                    if col in column_attributes:
+                        for field, value in column_attributes[col].items():
+                            var.attributes[field] = value
+                    
+                    attributes.append(var)
                     attr_indices.append(idx)
             
             domain = Domain(attributes, metas=metas)
@@ -239,9 +306,13 @@ class OWCustomPivot(OWWidget):
                 out_data = Table.from_numpy(domain, X)
             
             self.Outputs.data.send(out_data)
-            self.info_label.setText(
-                f"Output: {len(out_data)} rows, {len(out_data.domain.variables)} columns"
-            )
+            
+            # Show info including number of attributes added
+            attr_count = sum(len(attrs) for attrs in column_attributes.values())
+            info_text = f"Output: {len(out_data)} rows, {len(out_data.domain.variables)} columns"
+            if attr_count > 0:
+                info_text += f", {attr_count} column attributes added"
+            self.info_label.setText(info_text)
             
         except Exception as e:
             import traceback
