@@ -8,7 +8,7 @@ from AnyQt.QtWidgets import QVBoxLayout
 from pkg_resources import resource_filename
 
 class OWCustomPivot(OWWidget):
-    name = "Alternative Pivot Table"
+    name = "Pivot Alternative"
     description = "Pivot table transformation with configurable rows, columns, and values"
     icon = resource_filename(__name__, "../icons/Pivot-alternative.svg")
     priority = 10
@@ -22,11 +22,16 @@ class OWCustomPivot(OWWidget):
     want_main_area = False
     resizing_enabled = False
 
-    # Settings
+    # Settings - use ContextSetting for variable-dependent settings
     row_var_index = Setting(0)
     col_var_index = Setting(0)
     val_var_index = Setting(0)
     aggregation = Setting(0)
+    
+    # Store variable names to restore selection
+    row_var_name = Setting("")
+    col_var_name = Setting("")
+    val_var_name = Setting("")
 
     def __init__(self):
         super().__init__()
@@ -81,6 +86,15 @@ class OWCustomPivot(OWWidget):
             all_vars = list(data.domain.variables) + list(data.domain.metas)
             self.var_names = [var.name for var in all_vars]
             self.update_combos()
+            
+            # Restore previous selections if variable names match
+            if self.row_var_name in self.var_names:
+                self.row_var_index = self.var_names.index(self.row_var_name)
+            if self.col_var_name in self.var_names:
+                self.col_var_index = self.var_names.index(self.col_var_name)
+            if self.val_var_name in self.var_names:
+                self.val_var_index = self.var_names.index(self.val_var_name)
+            
             self.info_label.setText(f"Input: {len(data)} rows, {len(self.var_names)} columns")
         else:
             self.var_names = []
@@ -107,8 +121,14 @@ class OWCustomPivot(OWWidget):
                 self.val_var_index = min(2, len(self.var_names) - 1)
 
     def on_selection_changed(self):
-        # Auto-apply when selection changes
-        pass
+        # Save variable names when selection changes
+        if self.var_names:
+            if 0 <= self.row_var_index < len(self.var_names):
+                self.row_var_name = self.var_names[self.row_var_index]
+            if 0 <= self.col_var_index < len(self.var_names):
+                self.col_var_name = self.var_names[self.col_var_index]
+            if 0 <= self.val_var_index < len(self.var_names):
+                self.val_var_name = self.var_names[self.val_var_index]
 
     def apply_pivot(self):
         if self.data is None:

@@ -7,9 +7,9 @@ from pkg_resources import resource_filename
 
 
 class OWSimpleTransposeTable(widget.OWWidget):
-    name = "Alternative Transpose"
+    name = "Transpose as String"
     description = "Transpose a data table regardless of field types"
-    icon = resource_filename(__name__, "../icons/Transpose-alternative.svg")
+    icon = resource_filename(__name__, "../icons/Transpose-string.svg")
     priority = 10
 
     class Inputs:
@@ -24,6 +24,9 @@ class OWSimpleTransposeTable(widget.OWWidget):
     # Settings
     column_for_names = Setting(0)  # Index of column to use for names
     use_attribute_names_as_column = Setting(True)
+    
+    # Store the actual column name to restore selection after reload
+    _selected_column_name = Setting("")  # Empty string means "generic names"
 
     def __init__(self):
         super().__init__()
@@ -36,7 +39,7 @@ class OWSimpleTransposeTable(widget.OWWidget):
         self.column_combo = gui.comboBox(
             box, self, "column_for_names",
             label="Column for new attribute names:",
-            callback=self.transpose_data,
+            callback=self.on_column_selection_changed,
             sendSelectedValue=False
         )
         
@@ -46,15 +49,31 @@ class OWSimpleTransposeTable(widget.OWWidget):
 
         gui.rubber(self.controlArea)
 
+    def on_column_selection_changed(self):
+        """Called when column selection changes"""
+        # Store the name of the selected column for persistence
+        if self.column_for_names == 0:
+            self._selected_column_name = ""
+        elif self.column_for_names <= len(self.all_vars):
+            self._selected_column_name = self.all_vars[self.column_for_names - 1].name
+        
+        self.transpose_data()
+
     @Inputs.data
     def set_data(self, data):
         self.data = data
         self.update_column_combo()
+        self.restore_column_selection()
         self.transpose_data()
 
     def update_column_combo(self):
+        """Update the combo box with available columns"""
+        # Block signals to prevent triggering callbacks during update
+        self.column_combo.blockSignals(True)
         self.column_combo.clear()
+        
         if self.data is None:
+            self.column_combo.blockSignals(False)
             return
         
         # Get all variables
@@ -69,9 +88,27 @@ class OWSimpleTransposeTable(widget.OWWidget):
         for var in self.all_vars:
             self.column_combo.addItem(var.name)
         
-        # Reset selection if out of bounds
-        if self.column_for_names > len(self.all_vars):
+        self.column_combo.blockSignals(False)
+
+    def restore_column_selection(self):
+        """Restore the previously selected column by name"""
+        if not self.all_vars:
             self.column_for_names = 0
+            return
+        
+        # If we have a stored column name, try to find it
+        if self._selected_column_name:
+            for idx, var in enumerate(self.all_vars):
+                if var.name == self._selected_column_name:
+                    self.column_for_names = idx + 1  # +1 because 0 is "generic names"
+                    return
+            # If not found, reset to generic names
+            self.column_for_names = 0
+            self._selected_column_name = ""
+        else:
+            # Empty string means generic names (index 0)
+            if self.column_for_names > len(self.all_vars):
+                self.column_for_names = 0
 
     def transpose_data(self):
         if self.data is None:
