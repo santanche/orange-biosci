@@ -10,12 +10,12 @@ pip install build twine
 python -m build
 ~~~
 
-# Check the build
-~~~bash
-twine check dist/*
-~~~
-
 # Upload to PyPI (for real)
 ~~~bash
 twine upload dist/*
+~~~
+
+# Check the build
+~~~bash
+twine check dist/*
 ~~~

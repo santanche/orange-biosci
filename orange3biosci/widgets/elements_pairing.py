@@ -13,10 +13,10 @@ from Orange.widgets.utils.widgetpreview import WidgetPreview
 from Orange.widgets.widget import OWWidget, Input, Output, Msg
 
 
-class OWSourcePairing(OWWidget):
-    name = "Source Pairing"
+class OWElementsPairing(OWWidget):
+    name = "Elements Pairing"
     description = "Generate pairs of sources that share the same target"
-    icon = resource_filename(__name__, "../icons/projection-icon.svg")
+    icon = resource_filename(__name__, "../icons/ElementsPairing.svg")
     priority = 10
     
     class Inputs:
@@ -301,7 +301,7 @@ def main():
     # Create test data
     data = Table("iris")  # You can replace this with your own test data
     
-    widget = OWSourcePairing()
+    widget = OWElementsPairing()
     widget.set_data(data)
     widget.show()
     

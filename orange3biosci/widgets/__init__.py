@@ -12,7 +12,9 @@ WIDGETS = [
     # The class name and a friendly name for its menu entry
     'OWGeoPreprocessor',
     'OWGeoSoftExtractor',
-    'OWSourcePairing',
+    'OWElementsPairing',
+    'OWSimpleTransposeTable',
+    'OWCustomPivot'
 ]
 
 # The .py file where each widget is implemented
