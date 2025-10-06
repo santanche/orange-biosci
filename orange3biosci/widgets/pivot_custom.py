@@ -75,13 +75,11 @@ class OWCustomPivot(OWWidget):
         )
         
         # New section for column attributes
-        attr_box = gui.widgetBox(self.controlArea, "Column Attributes")
-        gui.widgetLabel(attr_box, "Select fields to attach as column attributes:")
-        
+        gui.widgetLabel(box, "Column Attributes")
         self.attr_fields_list = QListWidget()
         self.attr_fields_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.attr_fields_list.itemSelectionChanged.connect(self.on_attr_fields_changed)
-        attr_box.layout().addWidget(self.attr_fields_list)
+        box.layout().addWidget(self.attr_fields_list)
         
         # Auto-apply checkbox
         gui.checkBox(
@@ -155,6 +153,8 @@ class OWCustomPivot(OWWidget):
 
     def update_attr_fields_list(self):
         """Update the list of available fields for column attributes"""
+        # Block signals to prevent triggering changes during update
+        self.attr_fields_list.blockSignals(True)
         self.attr_fields_list.clear()
         
         if self.var_names:
@@ -165,6 +165,9 @@ class OWCustomPivot(OWWidget):
                 item = self.attr_fields_list.item(i)
                 if item.text() in self.selected_attr_fields:
                     item.setSelected(True)
+        
+        # Unblock signals
+        self.attr_fields_list.blockSignals(False)
 
     def on_attr_fields_changed(self):
         """Handle changes in attribute fields selection"""
