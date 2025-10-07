@@ -75,11 +75,13 @@ class OWCustomPivot(OWWidget):
         )
         
         # New section for column attributes
-        gui.widgetLabel(box, "Column Attributes")
+        attr_box = gui.widgetBox(self.controlArea, "Column Attributes")
+        gui.widgetLabel(attr_box, "Select fields to attach as column attributes:")
+        
         self.attr_fields_list = QListWidget()
         self.attr_fields_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.attr_fields_list.itemSelectionChanged.connect(self.on_attr_fields_changed)
-        box.layout().addWidget(self.attr_fields_list)
+        attr_box.layout().addWidget(self.attr_fields_list)
         
         # Auto-apply checkbox
         gui.checkBox(
@@ -243,7 +245,7 @@ class OWCustomPivot(OWWidget):
             
             # Get attribute values for each column before resetting index
             column_attributes = {}
-            if self.selected_attr_fields:
+            if self.selected_attr_fields and len(self.selected_attr_fields) > 0:
                 # For each column in the pivoted result (excluding index)
                 for col_value in pivoted.columns:
                     # Filter original dataframe for this column value
@@ -262,7 +264,9 @@ class OWCustomPivot(OWWidget):
                                 else:
                                     col_attrs[field] = str(first_value)
                     
-                    column_attributes[str(col_value)] = col_attrs
+                    # Only store if there are attributes to store
+                    if col_attrs:
+                        column_attributes[str(col_value)] = col_attrs
             
             # Reset index to make row variable a column
             pivoted = pivoted.reset_index()
@@ -289,7 +293,7 @@ class OWCustomPivot(OWWidget):
                     var = ContinuousVariable(col)
                     
                     # Add attributes to the variable if this column has them
-                    if col in column_attributes:
+                    if col in column_attributes and column_attributes[col]:
                         for field, value in column_attributes[col].items():
                             var.attributes[field] = value
                     
