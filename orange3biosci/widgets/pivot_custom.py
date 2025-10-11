@@ -266,6 +266,9 @@ class OWCustomPivot(OWWidget):
                     
                     # Only store if there are attributes to store
                     if col_attrs:
+                        # Create the 'class' attribute by concatenating all values with pipe
+                        class_value = "|".join(col_attrs.values())
+                        col_attrs['class'] = class_value
                         column_attributes[str(col_value)] = col_attrs
             
             # Reset index to make row variable a column
