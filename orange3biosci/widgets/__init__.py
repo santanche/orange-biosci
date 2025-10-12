@@ -14,7 +14,8 @@ WIDGETS = [
     'OWGeoSoftExtractor',
     'OWElementsPairing',
     'OWSimpleTransposeTable',
-    'OWCustomPivot'
+    'OWCustomPivot',
+    'OWListSplitter'
 ]
 
 # The .py file where each widget is implemented

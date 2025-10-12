@@ -75,13 +75,12 @@ class OWCustomPivot(OWWidget):
         )
         
         # New section for column attributes
-        attr_box = gui.widgetBox(self.controlArea, "Column Attributes")
-        gui.widgetLabel(attr_box, "Select fields to attach as column attributes:")
+        gui.widgetLabel(box, "Column attributes:")
         
         self.attr_fields_list = QListWidget()
         self.attr_fields_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.attr_fields_list.itemSelectionChanged.connect(self.on_attr_fields_changed)
-        attr_box.layout().addWidget(self.attr_fields_list)
+        box.layout().addWidget(self.attr_fields_list)
         
         # Auto-apply checkbox
         gui.checkBox(
