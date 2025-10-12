@@ -7,12 +7,12 @@ from Orange.widgets import gui, widget
 from Orange.widgets.settings import Setting
 from Orange.widgets.widget import Input, Output
 import numpy as np
-
+from pkg_resources import resource_filename
 
 class OWListSplitter(widget.OWWidget):
     name = "List Splitter"
     description = "Split delimited values in a field into multiple rows or filter first/last occurrence"
-    icon = "icons/mywidget.svg"
+    icon = resource_filename(__name__, "../icons/ListSplitter.svg")
     priority = 10
 
     class Inputs:
@@ -28,7 +28,7 @@ class OWListSplitter(widget.OWWidget):
     selected_field_name = Setting("", schema_only=True)
     delimiter = Setting(":", schema_only=True)
     split_mode = Setting(0, schema_only=True)  # 0: First, 1: Last, 2: Split All
-    auto_apply = Setting(False, schema_only=True)
+    auto_apply = Setting(True, schema_only=True)
 
     def __init__(self):
         super().__init__()
@@ -97,8 +97,6 @@ class OWListSplitter(widget.OWWidget):
 
     @Inputs.data
     def set_data(self, data):
-        print('=== data')
-        print(data)
         self.data = data
         self.field_combo.clear()
         self.field_names = []
@@ -127,18 +125,20 @@ class OWListSplitter(widget.OWWidget):
             return
         
         # Populate combo box
+        self.field_combo.blockSignals(True)  # Prevent triggering on_field_changed during setup
         self.field_combo.addItems(self.field_names)
-        print('=== combo fields and selection')
-        print(self.selected_field_name)
-        print(self.field_names)
         
         # Restore previous selection by name
+        restored_index = 0
         if self.selected_field_name and self.selected_field_name in self.field_names:
-            index = self.field_names.index(self.selected_field_name)
-            self.field_combo.setCurrentIndex(index)
+            restored_index = self.field_names.index(self.selected_field_name)
         else:
-            self.field_combo.setCurrentIndex(0)
-            self.selected_field_name = self.field_names[0] if self.field_names else ""
+            # Set default to first field
+            if self.field_names:
+                self.selected_field_name = self.field_names[0]
+        
+        self.field_combo.setCurrentIndex(restored_index)
+        self.field_combo.blockSignals(False)  # Re-enable signals
         
         self.info_label.setText(f"Loaded {len(self.data)} rows, {len(self.field_names)} fields")
         
@@ -178,18 +178,18 @@ class OWListSplitter(widget.OWWidget):
             self.Outputs.data.send(None)
             return
         
-        # Get currently selected field
-        current_index = self.field_combo.currentIndex()
-        if current_index < 0 or current_index >= len(self.field_names):
-            self.info_label.setText("Invalid field selection")
-            self.Outputs.data.send(None)
-            return
-        
-        print('=== index and field')
-        print(current_index)
-        print(self.field_names)
-        selected_field = self.field_names[current_index]
-        self.selected_field_name = selected_field  # Update setting
+        # Use the stored field name directly instead of relying on currentIndex
+        if self.selected_field_name and self.selected_field_name in self.field_names:
+            selected_field = self.selected_field_name
+        else:
+            # Fallback to current selection
+            current_index = self.field_combo.currentIndex()
+            if current_index < 0 or current_index >= len(self.field_names):
+                self.info_label.setText("Invalid field selection")
+                self.Outputs.data.send(None)
+                return
+            selected_field = self.field_names[current_index]
+            self.selected_field_name = selected_field  # Update setting
 
         if not self.delimiter:
             self.info_label.setText("Delimiter cannot be empty")

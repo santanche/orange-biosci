@@ -1,19 +1,19 @@
 <?xml version='1.0' encoding='utf-8'?>
-<scheme version="2.0" title="List Splitter Example" description="">
+<scheme version="2.0" title="" description="">
 	<nodes>
-		<node id="0" name="List Splitter" qualified_name="orange3biosci.widgets.list_splitter.OWListSplitter" project_name="orange-biosci" version="" title="List Splitter" position="(367.0, 206.0)" />
-		<node id="1" name="CSV File Import" qualified_name="Orange.widgets.data.owcsvimport.OWCSVFileImport" project_name="Orange3" version="" title="CSV File Import" position="(216.66666666666663, 206.66666666666669)" />
-		<node id="2" name="Data Table" qualified_name="Orange.widgets.data.owtable.OWTable" project_name="Orange3" version="" title="Data Table" position="(507.66666666666663, 204.66666666666669)" />
+		<node id="0" name="CSV File Import" qualified_name="Orange.widgets.data.owcsvimport.OWCSVFileImport" project_name="Orange3" version="" title="CSV File Import" position="(150, 150)" />
+		<node id="1" name="List Splitter" qualified_name="orange3biosci.widgets.list_splitter.OWListSplitter" project_name="orange-biosci" version="" title="List Splitter" position="(300, 150)" />
+		<node id="2" name="Data Table" qualified_name="Orange.widgets.data.owtable.OWTable" project_name="Orange3" version="" title="Data Table" position="(450, 150)" />
 	</nodes>
 	<links>
-		<link id="0" source_node_id="1" sink_node_id="0" source_channel="Data" sink_channel="Data" enabled="true" source_channel_id="data" sink_channel_id="data" />
-		<link id="1" source_node_id="0" sink_node_id="2" source_channel="Data" sink_channel="Data" enabled="true" source_channel_id="data" sink_channel_id="data" />
+		<link id="0" source_node_id="0" sink_node_id="1" source_channel="Data" sink_channel="Data" enabled="true" source_channel_id="data" sink_channel_id="data" />
+		<link id="1" source_node_id="1" sink_node_id="2" source_channel="Data" sink_channel="Data" enabled="true" source_channel_id="data" sink_channel_id="data" />
 	</links>
 	<annotations />
 	<thumbnail />
 	<node_properties>
-		<properties node_id="0" format="literal">{'controlAreaVisible': True, 'delimiter': '/', 'savedWidgetGeometry': b'\x01\xd9\xd0\xcb\x00\x03\x00\x00\x00\x00\n\xda\x00\x00\x01=\x00\x00\x0b\xe2\x00\x00\x02\x80\x00\x00\n\xda\x00\x00\x01=\x00\x00\x0b\xe2\x00\x00\x02\x80\x00\x00\x00\x00\x00\x00\x00\x00\x07\x80\x00\x00\n\xda\x00\x00\x01=\x00\x00\x0b\xe2\x00\x00\x02\x80', 'selected_field_index': 0, 'split_mode': 2, '__version__': 1}</properties>
-		<properties node_id="1" format="literal">{'_session_items': [], '_session_items_v2': [({'type': 'VarPath', 'name': 'basedir', 'relpath': 'list-splitter-table.csv'}, {'encoding': 'utf-8', 'delimiter': ',', 'quotechar': '"', 'doublequote': True, 'skipinitialspace': True, 'quoting': 0, 'columntypes': [{'start': 0, 'stop': 2, 'value': 'Text'}], 'rowspec': [{'start': 0, 'stop': 1, 'value': 'Header'}], 'decimal_separator': '.', 'group_separator': ''})], 'compatibility_mode': False, 'controlAreaVisible': True, 'dialog_state': {'directory': '/home/santanche/Documents/thca2', 'filter': 'Text - comma separated (*.csv, *)'}, 'savedWidgetGeometry': b'\x01\xd9\xd0\xcb\x00\x03\x00\x00\x00\x00\x03#\x00\x00\x01X\x00\x00\x04\\\x00\x00\x02\xbb\x00\x00\x03#\x00\x00\x01}\x00\x00\x04\\\x00\x00\x02\xbb\x00\x00\x00\x01\x00\x00\x00\x00\x07\x80\x00\x00\x03#\x00\x00\x01}\x00\x00\x04\\\x00\x00\x02\xbb', '__version__': 3}</properties>
+		<properties node_id="0" format="literal">{'_session_items': [], '_session_items_v2': [({'type': 'VarPath', 'name': 'basedir', 'relpath': 'list-splitter-table.csv'}, {'encoding': 'utf-8', 'delimiter': ',', 'quotechar': '"', 'doublequote': True, 'skipinitialspace': True, 'quoting': 0, 'columntypes': [{'start': 0, 'stop': 3, 'value': 'Text'}], 'rowspec': [{'start': 0, 'stop': 1, 'value': 'Header'}], 'decimal_separator': '.', 'group_separator': ''})], 'compatibility_mode': False, 'controlAreaVisible': True, 'dialog_state': {'directory': '/home/santanche/git/orange-biosci/examples', 'filter': 'Text - comma separated (*.csv, *)'}, 'savedWidgetGeometry': b'\x01\xd9\xd0\xcb\x00\x03\x00\x00\x00\x00\x03\x1a\x00\x00\x01z\x00\x00\x04e\x00\x00\x02\xbd\x00\x00\x03\x1a\x00\x00\x01z\x00\x00\x04e\x00\x00\x02\xbd\x00\x00\x00\x01\x00\x00\x00\x00\x07\x80\x00\x00\x03\x1a\x00\x00\x01z\x00\x00\x04e\x00\x00\x02\xbd', '__version__': 3}</properties>
+		<properties node_id="1" format="literal">{'auto_apply': True, 'controlAreaVisible': True, 'delimiter': ':', 'savedWidgetGeometry': b'\x01\xd9\xd0\xcb\x00\x03\x00\x00\x00\x00\n\xda\x00\x00\x01=\x00\x00\x0b\xfe\x00\x00\x02\xb2\x00\x00\n\xda\x00\x00\x01=\x00\x00\x0b\xfe\x00\x00\x02\xb2\x00\x00\x00\x00\x00\x00\x00\x00\x07\x80\x00\x00\n\xda\x00\x00\x01=\x00\x00\x0b\xfe\x00\x00\x02\xb2', 'selected_field_name': 'field2', 'split_mode': 2, '__version__': 1}</properties>
 		<properties node_id="2" format="literal">{'auto_commit': True, 'color_by_class': True, 'controlAreaVisible': True, 'savedWidgetGeometry': b'\x01\xd9\xd0\xcb\x00\x03\x00\x00\x00\x00\x0b\x87\x00\x00\x01\x03\x00\x00\x0e\x86\x00\x00\x02\x9a\x00\x00\x0b\x87\x00\x00\x01\x03\x00\x00\x0e\x86\x00\x00\x02\x9a\x00\x00\x00\x00\x00\x00\x00\x00\x07\x80\x00\x00\x0b\x87\x00\x00\x01\x03\x00\x00\x0e\x86\x00\x00\x02\x9a', 'select_rows': True, 'show_attribute_labels': True, 'show_distributions': False, 'stored_selection': {'rows': [], 'columns': []}, 'stored_sort': [], '__version__': 1}</properties>
 	</node_properties>
 	<session_state>
