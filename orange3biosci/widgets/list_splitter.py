@@ -7,12 +7,12 @@ from Orange.widgets import gui, widget
 from Orange.widgets.settings import Setting
 from Orange.widgets.widget import Input, Output
 import numpy as np
-from pkg_resources import resource_filename
+
 
 class OWListSplitter(widget.OWWidget):
     name = "List Splitter"
     description = "Split delimited values in a field into multiple rows or filter first/last occurrence"
-    icon = resource_filename(__name__, "../icons/ListSplitter.svg")
+    icon = "icons/mywidget.svg"
     priority = 10
 
     class Inputs:
@@ -25,9 +25,10 @@ class OWListSplitter(widget.OWWidget):
     resizing_enabled = False
 
     # Settings
-    selected_field_index = Setting(0)
-    delimiter = Setting(":")
-    split_mode = Setting(0)  # 0: First, 1: Last, 2: Split All
+    selected_field_name = Setting("", schema_only=True)
+    delimiter = Setting(":", schema_only=True)
+    split_mode = Setting(0, schema_only=True)  # 0: First, 1: Last, 2: Split All
+    auto_apply = Setting(False, schema_only=True)
 
     def __init__(self):
         super().__init__()
@@ -79,8 +80,16 @@ class OWListSplitter(widget.OWWidget):
             
         self.mode_group.buttonClicked.connect(self.on_mode_changed)
 
-        # Apply button
-        self.apply_button = gui.button(self.controlArea, self, "Apply", callback=self.apply)
+        # Auto-apply checkbox and Apply button
+        button_box = gui.widgetBox(self.controlArea, "")
+        self.auto_apply_checkbox = gui.checkBox(
+            button_box, self, "auto_apply", "Apply Automatically",
+            callback=self.on_auto_apply_changed
+        )
+        self.apply_button = gui.button(button_box, self, "Apply", callback=self.apply)
+        
+        # Set initial button state
+        self.apply_button.setEnabled(not self.auto_apply)
 
         # Info label
         self.info_label = QLabel("No data loaded")
@@ -88,6 +97,8 @@ class OWListSplitter(widget.OWWidget):
 
     @Inputs.data
     def set_data(self, data):
+        print('=== data')
+        print(data)
         self.data = data
         self.field_combo.clear()
         self.field_names = []
@@ -117,24 +128,44 @@ class OWListSplitter(widget.OWWidget):
         
         # Populate combo box
         self.field_combo.addItems(self.field_names)
+        print('=== combo fields and selection')
+        print(self.selected_field_name)
+        print(self.field_names)
         
-        # Restore previous selection if valid
-        if 0 <= self.selected_field_index < len(self.field_names):
-            self.field_combo.setCurrentIndex(self.selected_field_index)
+        # Restore previous selection by name
+        if self.selected_field_name and self.selected_field_name in self.field_names:
+            index = self.field_names.index(self.selected_field_name)
+            self.field_combo.setCurrentIndex(index)
         else:
-            self.selected_field_index = 0
             self.field_combo.setCurrentIndex(0)
+            self.selected_field_name = self.field_names[0] if self.field_names else ""
         
         self.info_label.setText(f"Loaded {len(self.data)} rows, {len(self.field_names)} fields")
+        
+        # Auto-apply if enabled
+        if self.auto_apply:
+            self.apply()
 
     def on_field_changed(self, index):
-        self.selected_field_index = index
+        if 0 <= index < len(self.field_names):
+            self.selected_field_name = self.field_names[index]
+            if self.auto_apply:
+                self.apply()
 
     def on_delimiter_changed(self, text):
         self.delimiter = text
+        if self.auto_apply:
+            self.apply()
 
     def on_mode_changed(self):
         self.split_mode = self.mode_group.checkedId()
+        if self.auto_apply:
+            self.apply()
+    
+    def on_auto_apply_changed(self):
+        self.apply_button.setEnabled(not self.auto_apply)
+        if self.auto_apply:
+            self.apply()
 
     def apply(self):
         if self.data is None:
@@ -142,17 +173,28 @@ class OWListSplitter(widget.OWWidget):
             self.Outputs.data.send(None)
             return
 
-        if not self.field_names or self.selected_field_index >= len(self.field_names):
+        if not self.field_names:
+            self.info_label.setText("No fields available")
+            self.Outputs.data.send(None)
+            return
+        
+        # Get currently selected field
+        current_index = self.field_combo.currentIndex()
+        if current_index < 0 or current_index >= len(self.field_names):
             self.info_label.setText("Invalid field selection")
             self.Outputs.data.send(None)
             return
+        
+        print('=== index and field')
+        print(current_index)
+        print(self.field_names)
+        selected_field = self.field_names[current_index]
+        self.selected_field_name = selected_field  # Update setting
 
         if not self.delimiter:
             self.info_label.setText("Delimiter cannot be empty")
             self.Outputs.data.send(None)
             return
-
-        selected_field = self.field_names[self.selected_field_index]
         
         try:
             result = self.process_data(selected_field)
