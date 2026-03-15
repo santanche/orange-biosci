@@ -8,7 +8,7 @@ from pkg_resources import resource_filename
 import urllib.request
 import tempfile
 
-from AnyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFileDialog, QTextEdit, QListWidget, QSplitter, QAbstractItemView
+from AnyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFileDialog, QTextEdit, QListWidget, QSplitter, QAbstractItemView, QProgressBar
 from AnyQt.QtCore import Qt
 
 from Orange.widgets.widget import OWWidget, Input, Output
@@ -44,8 +44,7 @@ class OWGeoSoftExtractor(OWWidget):
         # Internal variables
         self.expression_data = None
         self.all_sample_titles = []
-        self.platform_data = {}  # Store platform annotation data (Entrez ID)
-        self.gene_symbols = {}  # Store gene symbols
+        self.gene_info = {}  # Store combined gene information (Entrez ID and Gene Symbol)
 
     def setup_gui(self):
         # Main layout with splitter
@@ -108,6 +107,12 @@ class OWGeoSoftExtractor(OWWidget):
         self.log_area.setMaximumHeight(120)
         self.log_area.setReadOnly(True)
         gui.widgetBox(left_panel, "Log").layout().addWidget(self.log_area)
+        
+        # Progress bar
+        progress_box = gui.widgetBox(left_panel, "Progress")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        progress_box.layout().addWidget(self.progress_bar)
         
         # Right panel - sample list
         right_panel = gui.widgetBox(None, "Available Sample Titles")
@@ -275,21 +280,34 @@ class OWGeoSoftExtractor(OWWidget):
             self.log_message(f"Error loading sample titles: {str(e)}")
 
     def download_url_to_temp(self, url):
-        """Download a URL to a temporary file"""
+        """Download a URL to a temporary file with progress bar"""
         try:
             self.log_message(f"Downloading file from URL...")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setValue(0)
+            
             # Create a temporary file
             suffix = '.soft.gz' if url.endswith('.gz') else '.soft'
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             temp_path = temp_file.name
             temp_file.close()
             
-            # Download the file
-            urllib.request.urlretrieve(url, temp_path)
+            # Download with progress tracking
+            def reporthook(block_num, block_size, total_size):
+                if total_size > 0:
+                    downloaded = block_num * block_size
+                    percent = min(int(downloaded * 100 / total_size), 100)
+                    self.progress_bar.setValue(percent)
+                    self.progress_bar.repaint()
+            
+            urllib.request.urlretrieve(url, temp_path, reporthook)
+            self.progress_bar.setValue(100)
             self.log_message(f"Download complete")
+            self.progress_bar.setVisible(False)
             return temp_path
         except Exception as e:
             self.log_message(f"Error downloading file: {str(e)}")
+            self.progress_bar.setVisible(False)
             return None
     
     def open_file(self, filename):
@@ -348,6 +366,8 @@ class OWGeoSoftExtractor(OWWidget):
                 generic_label = f"characteristic_{len(parsed_chars)}"
                 parsed_chars[generic_label] = char_line.strip()
         
+        parsed_chars['class'] = '|'.join([parsed_chars[k] for k in sorted(parsed_chars.keys())])
+        
         return parsed_chars
 
     def log_message(self, message):
@@ -355,28 +375,51 @@ class OWGeoSoftExtractor(OWWidget):
         self.log_area.repaint()
 
     def parse_platform_data(self, filename):
-        """Extract platform annotation data from SOFT file (handles .soft and .soft.gz)"""
-        platform_data = {}  # Entrez IDs
-        gene_symbols = {}   # Gene Symbols
+        """Extract platform annotation data from SOFT file - using working approach from original code"""
+        platform_data = {}
         current_platform = None
         in_platform_table = False
+        in_table_header = False
         header_indices = {}
+        
+        self.table_name = "GEO Expression Data"
+        self.taxonomy_id = "9606"  # Default to human
+        
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
         
         try:
             with self.open_file(filename) as f:
-                for line in f:
+                lines = f.readlines()
+                total_lines = len(lines)
+                
+                for line_idx, line in enumerate(lines):
+                    # Update progress every 1000 lines
+                    if line_idx % 1000 == 0:
+                        progress = int((line_idx / total_lines) * 100)
+                        self.progress_bar.setValue(progress)
+                        self.progress_bar.repaint()
+                    
                     line = line.strip()
                     
+                    if line.startswith('^SERIES'):
+                        self.table_name = line.split('=')[1].strip() if '=' in line else None
+    
                     # Check for platform start
                     if line.startswith('^PLATFORM'):
                         current_platform = line.split('=')[1].strip() if '=' in line else None
                         in_platform_table = False
+                        in_table_header = False
                         header_indices = {}
                         self.log_message(f"Found platform: {current_platform}")
                         
+                    if line.startswith('!Series_platform_taxid'):
+                        self.taxonomy_id = line.split('=')[1].strip() if '=' in line else self.taxonomy_id
+
                     # Check for platform table start
                     elif current_platform and line.startswith('!platform_table_begin'):
                         in_platform_table = True
+                        in_table_header = True
                         self.log_message("Started parsing platform table")
                         continue
                         
@@ -386,82 +429,110 @@ class OWGeoSoftExtractor(OWWidget):
                         self.log_message("Finished parsing platform table")
                         
                     # Parse platform table header
-                    elif in_platform_table and current_platform and line.startswith('#'):
-                        headers = line[1:].split('\t')  # Remove # and split
+                    elif in_platform_table and current_platform and in_table_header:
+                        headers = line.split('\t')
+                        in_table_header = False
                         for idx, header in enumerate(headers):
                             header_indices[header.strip().lower()] = idx
-                        self.log_message(f"Platform headers: {list(header_indices.keys())[:10]}...")  # Show first 10
+                        self.log_message(f"Platform headers: {list(header_indices.keys())}")
                         
                     # Parse platform table data
                     elif in_platform_table and current_platform and line and not line.startswith('!') and not line.startswith('#'):
                         parts = line.split('\t')
                         if len(parts) > 0:
                             probe_id = parts[0].strip()
+
+                            platform_data[probe_id] = {'entrez': '', 'symbol': ''}
+
                             entrez_id = None
-                            gene_symbol = None
                             
-                            # Extract Gene Symbol first
-                            symbol_fields = ['gene_symbol', 'gene symbol', 'symbol', 'gene', 'gene_name']
-                            for field_name in symbol_fields:
+                            # Look for Entrez ID in different possible columns (expanded search)
+                            possible_fields = ['gene', 'geneid', 'entrez_gene_id', 'gene_id', 'ncbi_gene_id', 'gene_assignment']
+                            
+                            for field_name in possible_fields:
                                 if field_name in header_indices:
                                     col_idx = header_indices[field_name]
                                     if col_idx < len(parts) and parts[col_idx].strip():
                                         value = parts[col_idx].strip()
-                                        # Take first value if multiple separated by ///
-                                        if '///' in value:
-                                            value = value.split('///')[0].strip()
-                                        if value and value != '---' and value != '':
-                                            gene_symbol = value
-                                            break
-                            
-                            # Extract Entrez ID
-                            entrez_fields = ['entrez_gene_id', 'entrez gene id', 'gene_id', 'geneid', 'entrez id', 'entrez_id']
-                            for field_name in entrez_fields:
-                                if field_name in header_indices:
-                                    col_idx = header_indices[field_name]
-                                    if col_idx < len(parts) and parts[col_idx].strip():
-                                        value = parts[col_idx].strip()
-                                        # Take first value if multiple separated by ///
-                                        if '///' in value:
-                                            value = value.split('///')[0].strip()
-                                        # Check if it's numeric
-                                        if value.isdigit():
-                                            entrez_id = value
-                                            break
-                            
-                            # If no direct Entrez ID field, try gene_assignment
-                            if not entrez_id and 'gene_assignment' in header_indices:
-                                col_idx = header_indices['gene_assignment']
-                                if col_idx < len(parts) and parts[col_idx].strip():
-                                    value = parts[col_idx].strip()
-                                    # gene_assignment format: Symbol // Description // Chromosome // Map // Entrez // ...
-                                    assignment_parts = value.split('//')
-                                    
-                                    # Try to find Entrez ID (usually numeric and > 2 digits)
-                                    for part in assignment_parts:
-                                        part = part.strip()
-                                        if part.isdigit() and len(part) > 2:
-                                            entrez_id = part
-                                            break
-                                    
-                                    # Try to extract gene symbol from gene_assignment if not found
-                                    if not gene_symbol and len(assignment_parts) > 0:
-                                        potential_symbol = assignment_parts[0].strip()
-                                        if potential_symbol and potential_symbol != '---':
-                                            gene_symbol = potential_symbol
+                                        
+                                        if field_name == 'gene_assignment':
+                                            # For gene_assignment, look for Entrez ID in the assignment string
+                                            # Format is often: Symbol // Description // Chromosome // Map Location // Entrez ID // ...
+                                            assignment_parts = value.split('//')
+                                            for i, part in enumerate(assignment_parts):
+                                                part = part.strip()
+                                                # Check if this part looks like an Entrez ID (numeric)
+                                                if part and part.isdigit() and len(part) > 2:
+                                                    entrez_id = part
+                                                    break
+                                            if entrez_id:
+                                                break
+                                        else:
+                                            # For other fields, try to extract numeric Entrez ID
+                                            # Handle multiple values separated by /// or ///
+                                            if '///' in value:
+                                                candidates = value.split('///')
+                                            elif '//' in value:
+                                                candidates = value.split('//')
+                                            else:
+                                                candidates = [value]
+                                            
+                                            for candidate in candidates:
+                                                candidate = candidate.strip()
+                                                # Try to extract just the numeric part
+                                                if candidate.isdigit() and len(candidate) > 2:
+                                                    entrez_id = candidate
+                                                    break
+                                                # Sometimes it's in format like "EntrezGene:12345"
+                                                elif ':' in candidate:
+                                                    parts_colon = candidate.split(':')
+                                                    if len(parts_colon) > 1 and parts_colon[1].strip().isdigit():
+                                                        entrez_id = parts_colon[1].strip()
+                                                        break
+                                            
+                                            if entrez_id:
+                                                break
                             
                             if entrez_id:
-                                platform_data[probe_id] = entrez_id
-                            
+                                platform_data[probe_id]['entrez'] = entrez_id
+
+                            # Try to find gene symbol in common fields
+                            possible_symbol_fields = ['gene symbol', 'gene_symbol', 'symbol', 'gene', 'gene_assignment', 'gene_name', 'geneid', 'gene_id', 'gene_title']
+                            gene_symbol = None
+                            for symbol_field in possible_symbol_fields:
+                                if symbol_field in header_indices:
+                                    col_idx = header_indices[symbol_field]
+                                    if col_idx < len(parts) and parts[col_idx].strip():
+                                        value = parts[col_idx].strip()
+                                        # For gene_assignment, symbol is often first part before //
+                                        if symbol_field == 'gene_assignment':
+                                            assignment_parts = value.split('//')
+                                            if assignment_parts:
+                                                gene_symbol = assignment_parts[0].strip()
+                                        else:
+                                            if '///' in value:
+                                                candidates = value.split('///')
+                                            elif '//' in value:
+                                                candidates = value.split('//')
+                                            else:
+                                                candidates = [value]
+                                            gene_symbol = candidates[0].strip()
+                                        break
+                            # You can store or use gene_symbol as needed
                             if gene_symbol:
-                                gene_symbols[probe_id] = gene_symbol
+                                platform_data[probe_id]['symbol'] = gene_symbol
+                
+                self.progress_bar.setValue(100)
                                 
         except Exception as e:
             self.log_message(f"Error parsing platform data: {str(e)}")
             import traceback
             self.log_message(f"Traceback: {traceback.format_exc()}")
         
-        return platform_data, gene_symbols
+        finally:
+            self.progress_bar.setVisible(False)
+
+        return platform_data
 
     def parse_soft_file_directly(self, filename, substring):
         """Parse SOFT file directly to extract sample info and expression data (handles .soft and .soft.gz)"""
@@ -552,14 +623,18 @@ class OWGeoSoftExtractor(OWWidget):
         
         # First, parse platform data for Entrez IDs and Gene Symbols
         self.log_message("Parsing platform annotation data...")
-        self.platform_data, self.gene_symbols = self.parse_platform_data(file_path)
-        self.log_message(f"Found Entrez IDs for {len(self.platform_data)} probes")
-        self.log_message(f"Found Gene Symbols for {len(self.gene_symbols)} probes")
+        self.gene_info = self.parse_platform_data(file_path)
+
+        entrez_count = sum(1 for info in self.gene_info.values() if info['entrez'])
+        symbol_count = sum(1 for info in self.gene_info.values() if info['symbol'])
+        self.log_message(f"Found Entrez IDs for {entrez_count} probes")
+        self.log_message(f"Found Gene Symbols for {symbol_count} probes")
         
         # Highlight matching samples in the list
         self.highlight_matching_samples()
         
-        # Parse the file
+        # Parse the file for expression data
+        self.log_message("Extracting expression data...")
         expression_data, sample_characteristics = self.parse_soft_file_directly(file_path, self.sample_substring)
         
         if not expression_data:
@@ -660,15 +735,19 @@ class OWGeoSoftExtractor(OWWidget):
         
         for gene_id in all_genes:
             gene_ids.append(gene_id)
-            gene_symbol = self.gene_symbols.get(gene_id, "")
-            gene_symbol_list.append(gene_symbol)
-            entrez_id = self.platform_data.get(gene_id, "")
-            entrez_ids.append(entrez_id)
+            
+            # Get gene info from the dictionary
+            if gene_id in self.gene_info:
+                gene_symbol_list.append(self.gene_info[gene_id]['symbol'])
+                entrez_ids.append(self.gene_info[gene_id]['entrez'])
+            else:
+                gene_symbol_list.append("")
+                entrez_ids.append("")
         
         gene_ids = np.array(gene_ids).reshape(-1, 1)
         gene_symbol_array = np.array(gene_symbol_list).reshape(-1, 1)
-        entrez_ids = np.array(entrez_ids).reshape(-1, 1)
-        metas_data = np.hstack([gene_ids, gene_symbol_array, entrez_ids])
+        entrez_ids_array = np.array(entrez_ids).reshape(-1, 1)
+        metas_data = np.hstack([gene_ids, gene_symbol_array, entrez_ids_array])
         
         # Create Orange Table
         table = Table.from_numpy(domain, X, metas=metas_data)
@@ -681,10 +760,10 @@ class OWGeoSoftExtractor(OWWidget):
         
         self.log_message(f"Created Orange Table '{table.name}': {n_genes} genes x {n_samples} samples")
         self.log_message(f"Non-missing values: {np.count_nonzero(~np.isnan(X))}")
-        entrez_count = np.count_nonzero([e for e in entrez_ids.flatten() if e])
-        self.log_message(f"Genes with Entrez IDs: {entrez_count}")
-        symbol_count = np.count_nonzero([s for s in gene_symbol_array.flatten() if s])
-        self.log_message(f"Genes with Symbols: {symbol_count}")
+        entrez_count = np.count_nonzero([e for e in entrez_ids if e])
+        self.log_message(f"Genes with Entrez IDs in output: {entrez_count}")
+        symbol_count = np.count_nonzero([s for s in gene_symbol_list if s])
+        self.log_message(f"Genes with Symbols in output: {symbol_count}")
         if self.transform_log2:
             self.log_message("Applied log2 to actual value transformation (2^x)")
         
