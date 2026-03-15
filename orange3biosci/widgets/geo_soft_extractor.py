@@ -5,8 +5,10 @@ import gzip
 from collections import defaultdict
 import numpy as np
 from pkg_resources import resource_filename
+import urllib.request
+import tempfile
 
-from AnyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFileDialog, QTextEdit, QListWidget, QSplitter
+from AnyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFileDialog, QTextEdit, QListWidget, QSplitter, QAbstractItemView
 from AnyQt.QtCore import Qt
 
 from Orange.widgets.widget import OWWidget, Input, Output
@@ -42,7 +44,8 @@ class OWGeoSoftExtractor(OWWidget):
         # Internal variables
         self.expression_data = None
         self.all_sample_titles = []
-        self.platform_data = {}  # Store platform annotation data
+        self.platform_data = {}  # Store platform annotation data (Entrez ID)
+        self.gene_symbols = {}  # Store gene symbols
 
     def setup_gui(self):
         # Main layout with splitter
@@ -83,7 +86,7 @@ class OWGeoSoftExtractor(OWWidget):
         gui.lineEdit(substring_box, self, "sample_substring", "Sample Substring:")
         
         # Select button to apply selection from list
-        self.select_button = QPushButton("Select from List")
+        self.select_button = QPushButton("Select in List")
         self.select_button.clicked.connect(self.select_from_list)
         self.select_button.setEnabled(False)
         substring_box.layout().addWidget(self.select_button)
@@ -110,13 +113,14 @@ class OWGeoSoftExtractor(OWWidget):
         right_panel = gui.widgetBox(None, "Available Sample Titles")
         splitter.addWidget(right_panel)
         
-        # Sample list widget
+        # Sample list widget with multi-selection enabled
         self.sample_list = QListWidget()
+        self.sample_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.sample_list.itemDoubleClicked.connect(self.on_sample_double_clicked)
         right_panel.layout().addWidget(self.sample_list)
         
         # Add a label for instructions
-        instruction_label = QLabel("Double-click a sample to use as substring filter")
+        instruction_label = QLabel("Double-click a sample to use as substring filter, or use 'Select in List' to preview matches")
         instruction_label.setWordWrap(True)
         instruction_label.setStyleSheet("color: gray; font-size: 10px;")
         right_panel.layout().addWidget(instruction_label)
@@ -157,7 +161,11 @@ class OWGeoSoftExtractor(OWWidget):
             return file_path
     
     def get_absolute_path(self, file_path):
-        """Convert relative path to absolute path if needed"""
+        """Convert relative path to absolute path if needed, or handle URL"""
+        # Check if it's a URL
+        if file_path.startswith('http://') or file_path.startswith('https://') or file_path.startswith('ftp://'):
+            return file_path
+        
         if not os.path.isabs(file_path):
             try:
                 # Get workflow directory if available
@@ -206,50 +214,41 @@ class OWGeoSoftExtractor(OWWidget):
         self.log_message(f"Selected substring: '{self.sample_substring}' from sample: {sample_text}")
         
     def select_from_list(self):
-        """Allow user to select samples from the list and use them as filter"""
-        selected_items = self.sample_list.selectedItems()
-        if not selected_items:
-            self.log_message("No samples selected. Please select one or more samples from the list.")
+        """Highlight samples in the list that match the current substring"""
+        if not self.sample_substring.strip():
+            self.log_message("Please enter a sample substring first")
             return
         
-        # Extract common substring from selected items
-        if len(selected_items) == 1:
-            # Single selection - extract meaningful word
-            self.on_sample_double_clicked(selected_items[0])
+        # Clear any previous selections
+        self.sample_list.clearSelection()
+        
+        # Select all items matching the substring
+        substring_lower = self.sample_substring.strip().lower()
+        matching_count = 0
+        
+        for i in range(self.sample_list.count()):
+            item = self.sample_list.item(i)
+            if substring_lower in item.text().lower():
+                item.setSelected(True)
+                matching_count += 1
+        
+        if matching_count > 0:
+            self.log_message(f"Selected {matching_count} samples matching '{self.sample_substring}'")
         else:
-            # Multiple selections - try to find common substring
-            titles = []
-            for item in selected_items:
-                sample_text = item.text()
-                if '(' in sample_text:
-                    title = sample_text.split('(')[0].strip()
-                else:
-                    title = sample_text
-                titles.append(title.lower())
-            
-            # Find common words across all titles
-            words_sets = [set(title.split()) for title in titles]
-            common_words = set.intersection(*words_sets) if words_sets else set()
-            
-            if common_words:
-                # Use the longest common word
-                common_word = max(common_words, key=len)
-                self.sample_substring = common_word
-                self.log_message(f"Selected {len(selected_items)} samples. Common substring: '{self.sample_substring}'")
-            else:
-                self.log_message("No common substring found in selected samples.")
-                # Use first word of first selection as fallback
-                first_title = titles[0] if titles else ""
-                words = first_title.split()
-                if words:
-                    self.sample_substring = words[0]
+            self.log_message(f"No samples found containing '{self.sample_substring}'")
 
     def load_sample_titles(self):
         """Load and display all sample titles from the SOFT file"""
         file_path = self.get_absolute_path(self.soft_file_path)
-        if not self.soft_file_path or not os.path.exists(file_path):
+        if not self.soft_file_path:
             self.log_message("Please select a valid SOFT file first")
             return
+        
+        # Check if it's a URL or local file
+        if not (file_path.startswith('http://') or file_path.startswith('https://') or file_path.startswith('ftp://')):
+            if not os.path.exists(file_path):
+                self.log_message("Please select a valid SOFT file first")
+                return
         
         self.log_message("Loading sample titles...")
         self.sample_list.clear()
@@ -257,6 +256,10 @@ class OWGeoSoftExtractor(OWWidget):
         
         try:
             sample_titles = self.get_all_sample_titles(file_path)
+            
+            # Sort alphabetically by title (not by accession)
+            sample_titles.sort(key=lambda x: x[1].lower())
+            
             self.all_sample_titles = sample_titles
             
             # Populate the list widget with inverted format: "Title (GSMxxxxxx)"
@@ -264,15 +267,41 @@ class OWGeoSoftExtractor(OWWidget):
                 display_text = f"{title} ({sample_id})"
                 self.sample_list.addItem(display_text)
             
-            self.log_message(f"Loaded {len(sample_titles)} sample titles")
+            self.log_message(f"Loaded {len(sample_titles)} sample titles (sorted alphabetically)")
             self.extract_button.setEnabled(True)
             self.select_button.setEnabled(True)
             
         except Exception as e:
             self.log_message(f"Error loading sample titles: {str(e)}")
 
+    def download_url_to_temp(self, url):
+        """Download a URL to a temporary file"""
+        try:
+            self.log_message(f"Downloading file from URL...")
+            # Create a temporary file
+            suffix = '.soft.gz' if url.endswith('.gz') else '.soft'
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            temp_path = temp_file.name
+            temp_file.close()
+            
+            # Download the file
+            urllib.request.urlretrieve(url, temp_path)
+            self.log_message(f"Download complete")
+            return temp_path
+        except Exception as e:
+            self.log_message(f"Error downloading file: {str(e)}")
+            return None
+    
     def open_file(self, filename):
-        """Open a file, handling both regular and gzipped files"""
+        """Open a file, handling both regular and gzipped files, and URLs"""
+        # Check if it's a URL
+        if filename.startswith('http://') or filename.startswith('https://') or filename.startswith('ftp://'):
+            # Download to temporary file first
+            temp_path = self.download_url_to_temp(filename)
+            if temp_path is None:
+                raise Exception("Failed to download file from URL")
+            filename = temp_path
+        
         if filename.endswith('.gz'):
             return gzip.open(filename, 'rt', encoding='utf-8', errors='ignore')
         else:
@@ -327,7 +356,8 @@ class OWGeoSoftExtractor(OWWidget):
 
     def parse_platform_data(self, filename):
         """Extract platform annotation data from SOFT file (handles .soft and .soft.gz)"""
-        platform_data = {}
+        platform_data = {}  # Entrez IDs
+        gene_symbols = {}   # Gene Symbols
         current_platform = None
         in_platform_table = False
         header_indices = {}
@@ -360,7 +390,7 @@ class OWGeoSoftExtractor(OWWidget):
                         headers = line[1:].split('\t')  # Remove # and split
                         for idx, header in enumerate(headers):
                             header_indices[header.strip().lower()] = idx
-                        self.log_message(f"Platform headers: {list(header_indices.keys())}")
+                        self.log_message(f"Platform headers: {list(header_indices.keys())[:10]}...")  # Show first 10
                         
                     # Parse platform table data
                     elif in_platform_table and current_platform and line and not line.startswith('!') and not line.startswith('#'):
@@ -368,63 +398,70 @@ class OWGeoSoftExtractor(OWWidget):
                         if len(parts) > 0:
                             probe_id = parts[0].strip()
                             entrez_id = None
+                            gene_symbol = None
                             
-                            # Look for Entrez ID in different possible columns (expanded search)
-                            possible_fields = ['gene', 'geneid', 'entrez_gene_id', 'gene_id', 'ncbi_gene_id', 'gene_assignment']
-                            
-                            for field_name in possible_fields:
+                            # Extract Gene Symbol first
+                            symbol_fields = ['gene_symbol', 'gene symbol', 'symbol', 'gene', 'gene_name']
+                            for field_name in symbol_fields:
                                 if field_name in header_indices:
                                     col_idx = header_indices[field_name]
                                     if col_idx < len(parts) and parts[col_idx].strip():
                                         value = parts[col_idx].strip()
-                                        
-                                        if field_name == 'gene_assignment':
-                                            # For gene_assignment, look for Entrez ID in the assignment string
-                                            # Format is often: Symbol // Description // Chromosome // Map Location // Entrez ID // ...
-                                            assignment_parts = value.split('//')
-                                            for i, part in enumerate(assignment_parts):
-                                                part = part.strip()
-                                                # Check if this part looks like an Entrez ID (numeric)
-                                                if part and part.isdigit() and len(part) > 2:
-                                                    entrez_id = part
-                                                    break
-                                            if entrez_id:
-                                                break
-                                        else:
-                                            # For other fields, try to extract numeric Entrez ID
-                                            # Handle multiple values separated by /// or ///
-                                            if '///' in value:
-                                                candidates = value.split('///')
-                                            elif '//' in value:
-                                                candidates = value.split('//')
-                                            else:
-                                                candidates = [value]
-                                            
-                                            for candidate in candidates:
-                                                candidate = candidate.strip()
-                                                # Try to extract just the numeric part
-                                                if candidate.isdigit() and len(candidate) > 2:
-                                                    entrez_id = candidate
-                                                    break
-                                                # Sometimes it's in format like "EntrezGene:12345"
-                                                elif ':' in candidate:
-                                                    parts_colon = candidate.split(':')
-                                                    if len(parts_colon) > 1 and parts_colon[1].strip().isdigit():
-                                                        entrez_id = parts_colon[1].strip()
-                                                        break
-                                            
-                                            if entrez_id:
-                                                break
+                                        # Take first value if multiple separated by ///
+                                        if '///' in value:
+                                            value = value.split('///')[0].strip()
+                                        if value and value != '---' and value != '':
+                                            gene_symbol = value
+                                            break
+                            
+                            # Extract Entrez ID
+                            entrez_fields = ['entrez_gene_id', 'entrez gene id', 'gene_id', 'geneid', 'entrez id', 'entrez_id']
+                            for field_name in entrez_fields:
+                                if field_name in header_indices:
+                                    col_idx = header_indices[field_name]
+                                    if col_idx < len(parts) and parts[col_idx].strip():
+                                        value = parts[col_idx].strip()
+                                        # Take first value if multiple separated by ///
+                                        if '///' in value:
+                                            value = value.split('///')[0].strip()
+                                        # Check if it's numeric
+                                        if value.isdigit():
+                                            entrez_id = value
+                                            break
+                            
+                            # If no direct Entrez ID field, try gene_assignment
+                            if not entrez_id and 'gene_assignment' in header_indices:
+                                col_idx = header_indices['gene_assignment']
+                                if col_idx < len(parts) and parts[col_idx].strip():
+                                    value = parts[col_idx].strip()
+                                    # gene_assignment format: Symbol // Description // Chromosome // Map // Entrez // ...
+                                    assignment_parts = value.split('//')
+                                    
+                                    # Try to find Entrez ID (usually numeric and > 2 digits)
+                                    for part in assignment_parts:
+                                        part = part.strip()
+                                        if part.isdigit() and len(part) > 2:
+                                            entrez_id = part
+                                            break
+                                    
+                                    # Try to extract gene symbol from gene_assignment if not found
+                                    if not gene_symbol and len(assignment_parts) > 0:
+                                        potential_symbol = assignment_parts[0].strip()
+                                        if potential_symbol and potential_symbol != '---':
+                                            gene_symbol = potential_symbol
                             
                             if entrez_id:
                                 platform_data[probe_id] = entrez_id
+                            
+                            if gene_symbol:
+                                gene_symbols[probe_id] = gene_symbol
                                 
         except Exception as e:
             self.log_message(f"Error parsing platform data: {str(e)}")
             import traceback
             self.log_message(f"Traceback: {traceback.format_exc()}")
         
-        return platform_data
+        return platform_data, gene_symbols
 
     def parse_soft_file_directly(self, filename, substring):
         """Parse SOFT file directly to extract sample info and expression data (handles .soft and .soft.gz)"""
@@ -491,9 +528,15 @@ class OWGeoSoftExtractor(OWWidget):
 
     def extract_data(self):
         file_path = self.get_absolute_path(self.soft_file_path)
-        if not self.soft_file_path or not os.path.exists(file_path):
+        if not self.soft_file_path:
             self.log_message("Please select a valid SOFT file")
             return
+        
+        # Check if it's a URL or local file
+        if not (file_path.startswith('http://') or file_path.startswith('https://') or file_path.startswith('ftp://')):
+            if not os.path.exists(file_path):
+                self.log_message("Please select a valid SOFT file")
+                return
             
         if not self.sample_substring.strip():
             self.log_message("Please enter a sample substring")
@@ -507,10 +550,11 @@ class OWGeoSoftExtractor(OWWidget):
         if file_path.endswith('.gz'):
             self.log_message("Detected gzipped file, extracting...")
         
-        # First, parse platform data for Entrez IDs
+        # First, parse platform data for Entrez IDs and Gene Symbols
         self.log_message("Parsing platform annotation data...")
-        self.platform_data = self.parse_platform_data(file_path)
+        self.platform_data, self.gene_symbols = self.parse_platform_data(file_path)
         self.log_message(f"Found Entrez IDs for {len(self.platform_data)} probes")
+        self.log_message(f"Found Gene Symbols for {len(self.gene_symbols)} probes")
         
         # Highlight matching samples in the list
         self.highlight_matching_samples()
@@ -581,8 +625,8 @@ class OWGeoSoftExtractor(OWWidget):
             
             attributes.append(var)
         
-        # Gene ID as "genes" and Entrez ID as meta attributes
-        metas = [StringVariable("genes"), StringVariable("Entrez ID")]
+        # Gene ID as "genes", Gene Symbol, and Entrez ID as meta attributes
+        metas = [StringVariable("genes"), StringVariable("Gene Symbol"), StringVariable("Entrez ID")]
         
         domain = Domain(attributes, metas=metas)
         
@@ -609,16 +653,22 @@ class OWGeoSoftExtractor(OWWidget):
                             value = np.nan
                     X[gene_idx, sample_idx] = value
         
-        # Create meta data (gene IDs and Entrez IDs)
-        gene_ids = np.array(all_genes).reshape(-1, 1)
+        # Create meta data (gene IDs, Gene Symbols, and Entrez IDs)
+        gene_ids = []
+        gene_symbol_list = []
         entrez_ids = []
         
         for gene_id in all_genes:
+            gene_ids.append(gene_id)
+            gene_symbol = self.gene_symbols.get(gene_id, "")
+            gene_symbol_list.append(gene_symbol)
             entrez_id = self.platform_data.get(gene_id, "")
             entrez_ids.append(entrez_id)
         
+        gene_ids = np.array(gene_ids).reshape(-1, 1)
+        gene_symbol_array = np.array(gene_symbol_list).reshape(-1, 1)
         entrez_ids = np.array(entrez_ids).reshape(-1, 1)
-        metas_data = np.hstack([gene_ids, entrez_ids])
+        metas_data = np.hstack([gene_ids, gene_symbol_array, entrez_ids])
         
         # Create Orange Table
         table = Table.from_numpy(domain, X, metas=metas_data)
@@ -633,6 +683,8 @@ class OWGeoSoftExtractor(OWWidget):
         self.log_message(f"Non-missing values: {np.count_nonzero(~np.isnan(X))}")
         entrez_count = np.count_nonzero([e for e in entrez_ids.flatten() if e])
         self.log_message(f"Genes with Entrez IDs: {entrez_count}")
+        symbol_count = np.count_nonzero([s for s in gene_symbol_array.flatten() if s])
+        self.log_message(f"Genes with Symbols: {symbol_count}")
         if self.transform_log2:
             self.log_message("Applied log2 to actual value transformation (2^x)")
         
