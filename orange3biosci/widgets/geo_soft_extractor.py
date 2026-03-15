@@ -1,6 +1,7 @@
 # Orange Widget for GEO SOFT Expression Data Extraction
 
 import os
+import gzip
 from collections import defaultdict
 import numpy as np
 from pkg_resources import resource_filename
@@ -23,8 +24,10 @@ class OWGeoSoftExtractor(OWWidget):
 
     # Widget settings
     soft_file_path = Setting("")
-    sample_substrings = Setting("")
-    transform_log2 = Setting(True)
+    sample_substring = Setting("Basal")
+    table_name = Setting("GEO Expression Data")
+    transform_log2 = Setting(False)
+    relative_to_workflow = Setting(False)
     
     # Outputs
     class Outputs:
@@ -66,18 +69,30 @@ class OWGeoSoftExtractor(OWWidget):
         file_widget = gui.widgetBox(file_box)
         file_widget.layout().addLayout(file_layout)
         
+        # Relative to workflow checkbox
+        gui.checkBox(file_box, self, "relative_to_workflow", "Relative to Workflow File",
+                    callback=self.on_relative_path_changed)
+        
         # Load samples button
         self.load_samples_button = QPushButton("Load Sample Titles")
         self.load_samples_button.clicked.connect(self.load_sample_titles)
         file_box.layout().addWidget(self.load_samples_button)
         
         # Sample substring input
-        gui.lineEdit(left_panel, self, "sample_substrings", "Sample Substrings:", 
-                     callback=self.on_substring_changed)
+        substring_box = gui.widgetBox(left_panel, "Sample Filter")
+        gui.lineEdit(substring_box, self, "sample_substring", "Sample Substring:")
+        
+        # Select button to apply selection from list
+        self.select_button = QPushButton("Select from List")
+        self.select_button.clicked.connect(self.select_from_list)
+        self.select_button.setEnabled(False)
+        substring_box.layout().addWidget(self.select_button)
+        
+        # Table name input
+        gui.lineEdit(left_panel, self, "table_name", "Output Table Name:")
         
         # Log2 transform checkbox
-        gui.checkBox(left_panel, self, "transform_log2", "Transform log2 to actual values",
-                    callback=self.on_transform_changed)
+        gui.checkBox(left_panel, self, "transform_log2", "Transform log2 to actual values")
         
         # Extract button
         self.extract_button = QPushButton("Extract Expression Data")
@@ -112,36 +127,127 @@ class OWGeoSoftExtractor(OWWidget):
 
     def browse_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select SOFT File", "", "SOFT Files (*.soft);;All Files (*)"
+            self, "Select SOFT File", "", "SOFT Files (*.soft *.soft.gz);;All Files (*)"
         )
         if file_path:
+            # Store as relative path if checkbox is checked
+            if self.relative_to_workflow:
+                file_path = self.make_relative_path(file_path)
             self.soft_file_path = file_path
             self.file_edit.setText(file_path)
 
+    def make_relative_path(self, file_path):
+        """Convert absolute path to relative path if possible"""
+        try:
+            # Get workflow directory if available
+            workflow_dir = self.workflowEnv().get("basedir", None) if hasattr(self, 'workflowEnv') else None
+            
+            if workflow_dir and os.path.isabs(file_path):
+                # Try to make path relative to workflow directory
+                try:
+                    rel_path = os.path.relpath(file_path, workflow_dir)
+                    # Only use relative path if it doesn't go above workflow directory
+                    if not rel_path.startswith('..'):
+                        return rel_path
+                except ValueError:
+                    # On Windows, relpath fails if paths are on different drives
+                    pass
+            return file_path
+        except Exception:
+            return file_path
+    
+    def get_absolute_path(self, file_path):
+        """Convert relative path to absolute path if needed"""
+        if not os.path.isabs(file_path):
+            try:
+                # Get workflow directory if available
+                workflow_dir = self.workflowEnv().get("basedir", None) if hasattr(self, 'workflowEnv') else None
+                if workflow_dir:
+                    return os.path.join(workflow_dir, file_path)
+            except Exception:
+                pass
+        return file_path
+
     def on_file_changed(self):
         self.soft_file_path = self.file_edit.text()
+        
+    def on_relative_path_changed(self):
+        """Handle change in relative path checkbox"""
+        if self.soft_file_path:
+            if self.relative_to_workflow:
+                # Convert to relative if possible
+                self.soft_file_path = self.make_relative_path(self.soft_file_path)
+            else:
+                # Convert to absolute
+                self.soft_file_path = self.get_absolute_path(self.soft_file_path)
+            self.file_edit.setText(self.soft_file_path)
 
     def on_sample_double_clicked(self, item):
         """Handle double-click on sample list item"""
         sample_text = item.text()
-        # Extract a meaningful substring from the sample title
-        # You can modify this logic to extract different parts
-        words = sample_text.split()
+        # Extract substring from the new format: "Title (GSMxxxxxx)"
+        # Remove the accession in parentheses to get the title
+        if '(' in sample_text:
+            title = sample_text.split('(')[0].strip()
+        else:
+            title = sample_text
+            
+        words = title.split()
         if len(words) > 0:
             # Use the first meaningful word (skip common prefixes)
             for word in words:
                 if len(word) > 3 and word.lower() not in ['sample', 'gsm', 'title']:
-                    self.sample_substrings = word
+                    self.sample_substring = word
                     break
             else:
                 # If no good word found, use first word
-                self.sample_substrings = words[0]
+                self.sample_substring = words[0]
         
-        self.log_message(f"Selected substring: '{self.sample_substrings}' from sample: {sample_text}")
+        self.log_message(f"Selected substring: '{self.sample_substring}' from sample: {sample_text}")
+        
+    def select_from_list(self):
+        """Allow user to select samples from the list and use them as filter"""
+        selected_items = self.sample_list.selectedItems()
+        if not selected_items:
+            self.log_message("No samples selected. Please select one or more samples from the list.")
+            return
+        
+        # Extract common substring from selected items
+        if len(selected_items) == 1:
+            # Single selection - extract meaningful word
+            self.on_sample_double_clicked(selected_items[0])
+        else:
+            # Multiple selections - try to find common substring
+            titles = []
+            for item in selected_items:
+                sample_text = item.text()
+                if '(' in sample_text:
+                    title = sample_text.split('(')[0].strip()
+                else:
+                    title = sample_text
+                titles.append(title.lower())
+            
+            # Find common words across all titles
+            words_sets = [set(title.split()) for title in titles]
+            common_words = set.intersection(*words_sets) if words_sets else set()
+            
+            if common_words:
+                # Use the longest common word
+                common_word = max(common_words, key=len)
+                self.sample_substring = common_word
+                self.log_message(f"Selected {len(selected_items)} samples. Common substring: '{self.sample_substring}'")
+            else:
+                self.log_message("No common substring found in selected samples.")
+                # Use first word of first selection as fallback
+                first_title = titles[0] if titles else ""
+                words = first_title.split()
+                if words:
+                    self.sample_substring = words[0]
 
     def load_sample_titles(self):
         """Load and display all sample titles from the SOFT file"""
-        if not self.soft_file_path or not os.path.exists(self.soft_file_path):
+        file_path = self.get_absolute_path(self.soft_file_path)
+        if not self.soft_file_path or not os.path.exists(file_path):
             self.log_message("Please select a valid SOFT file first")
             return
         
@@ -150,26 +256,34 @@ class OWGeoSoftExtractor(OWWidget):
         self.all_sample_titles = []
         
         try:
-            sample_titles = self.get_all_sample_titles(self.soft_file_path)
+            sample_titles = self.get_all_sample_titles(file_path)
             self.all_sample_titles = sample_titles
             
-            # Populate the list widget
+            # Populate the list widget with inverted format: "Title (GSMxxxxxx)"
             for sample_id, title in sample_titles:
-                display_text = f"{sample_id}: {title}"
+                display_text = f"{title} ({sample_id})"
                 self.sample_list.addItem(display_text)
             
             self.log_message(f"Loaded {len(sample_titles)} sample titles")
             self.extract_button.setEnabled(True)
+            self.select_button.setEnabled(True)
             
         except Exception as e:
             self.log_message(f"Error loading sample titles: {str(e)}")
 
+    def open_file(self, filename):
+        """Open a file, handling both regular and gzipped files"""
+        if filename.endswith('.gz'):
+            return gzip.open(filename, 'rt', encoding='utf-8', errors='ignore')
+        else:
+            return open(filename, 'r', encoding='utf-8', errors='ignore')
+    
     def get_all_sample_titles(self, filename):
-        """Extract all sample titles from SOFT file"""
+        """Extract all sample titles from SOFT file (handles .soft and .soft.gz)"""
         sample_titles = []
         current_sample = None
         
-        with open(filename, 'r') as f:
+        with self.open_file(filename) as f:
             for line in f:
                 line = line.strip()
                 
@@ -185,16 +299,9 @@ class OWGeoSoftExtractor(OWWidget):
         
         return sample_titles
 
-    def on_substring_changed(self):
-        pass  # Settings are automatically saved
-
-    def on_transform_changed(self):
-        pass  # Settings are automatically saved
-
     def parse_sample_characteristics(self, characteristics_list):
         """Parse sample characteristics into label-value pairs"""
         parsed_chars = {}
-        # class_chars = ''
         
         for char_line in characteristics_list:
             # Each characteristic is typically in format "label: value"
@@ -206,17 +313,12 @@ class OWGeoSoftExtractor(OWWidget):
                     # Clean up common label variations
                     label = label.replace(' ', '_').lower()
                     parsed_chars[label] = value
-                    # class_chars += ('|' if len(class_chars) > 0 else '') +value
             else:
                 # If no colon, treat the whole thing as a characteristic
                 # Use a generic label with index
                 generic_label = f"characteristic_{len(parsed_chars)}"
                 parsed_chars[generic_label] = char_line.strip()
-
-        parsed_chars['class'] = '|'.join([parsed_chars[k] for k in sorted(parsed_chars.keys())])
-
-        # parsed_chars['class'] = class_chars
-
+        
         return parsed_chars
 
     def log_message(self, message):
@@ -224,39 +326,27 @@ class OWGeoSoftExtractor(OWWidget):
         self.log_area.repaint()
 
     def parse_platform_data(self, filename):
-        """Extract platform annotation data from SOFT file"""
+        """Extract platform annotation data from SOFT file (handles .soft and .soft.gz)"""
         platform_data = {}
         current_platform = None
         in_platform_table = False
-        in_table_header = False
         header_indices = {}
-
-        self.table_name = "GEO Expression Data"
-        self.taxonomy_id = "9606"  # Default to human
         
         try:
-            with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
+            with self.open_file(filename) as f:
                 for line in f:
                     line = line.strip()
-
-                    if line.startswith('^SERIES'):
-                        self.table_name = line.split('=')[1].strip() if '=' in line else None
                     
                     # Check for platform start
                     if line.startswith('^PLATFORM'):
                         current_platform = line.split('=')[1].strip() if '=' in line else None
                         in_platform_table = False
-                        in_table_header = False
                         header_indices = {}
                         self.log_message(f"Found platform: {current_platform}")
-
-                    if line.startswith('!Series_platform_taxid'):
-                        self.taxonomy_id = line.split('=')[1].strip() if '=' in line else self.taxonomy_id
-
+                        
                     # Check for platform table start
                     elif current_platform and line.startswith('!platform_table_begin'):
                         in_platform_table = True
-                        in_table_header = True
                         self.log_message("Started parsing platform table")
                         continue
                         
@@ -266,9 +356,8 @@ class OWGeoSoftExtractor(OWWidget):
                         self.log_message("Finished parsing platform table")
                         
                     # Parse platform table header
-                    elif in_platform_table and current_platform and in_table_header:
-                        headers = line.split('\t')
-                        in_table_header = False
+                    elif in_platform_table and current_platform and line.startswith('#'):
+                        headers = line[1:].split('\t')  # Remove # and split
                         for idx, header in enumerate(headers):
                             header_indices[header.strip().lower()] = idx
                         self.log_message(f"Platform headers: {list(header_indices.keys())}")
@@ -278,9 +367,6 @@ class OWGeoSoftExtractor(OWWidget):
                         parts = line.split('\t')
                         if len(parts) > 0:
                             probe_id = parts[0].strip()
-
-                            platform_data[probe_id] = {}
-
                             entrez_id = None
                             
                             # Look for Entrez ID in different possible columns (expanded search)
@@ -331,34 +417,8 @@ class OWGeoSoftExtractor(OWWidget):
                                                 break
                             
                             if entrez_id:
-                                platform_data[probe_id]['entrez_id'] = entrez_id
-
-                            # Try to find gene symbol in common fields
-                            possible_symbol_fields = ['gene symbol', 'gene_symbol', 'symbol', 'gene', 'gene_assignment', 'gene_name', 'geneid', 'gene_id', 'gene_title']
-                            gene_symbol = None
-                            for symbol_field in possible_symbol_fields:
-                                if symbol_field in header_indices:
-                                    col_idx = header_indices[symbol_field]
-                                    if col_idx < len(parts) and parts[col_idx].strip():
-                                        value = parts[col_idx].strip()
-                                        # For gene_assignment, symbol is often first part before //
-                                        if symbol_field == 'gene_assignment':
-                                            assignment_parts = value.split('//')
-                                            if assignment_parts:
-                                                gene_symbol = assignment_parts[0].strip()
-                                        else:
-                                            if '///' in value:
-                                                candidates = value.split('///')
-                                            elif '//' in value:
-                                                candidates = value.split('//')
-                                            else:
-                                                candidates = [value]
-                                            gene_symbol = candidates[0].strip()
-                                        break
-                            # You can store or use gene_symbol as needed
-                            if gene_symbol:
-                                platform_data[probe_id]['gene_symbol'] = gene_symbol
-
+                                platform_data[probe_id] = entrez_id
+                                
         except Exception as e:
             self.log_message(f"Error parsing platform data: {str(e)}")
             import traceback
@@ -366,19 +426,17 @@ class OWGeoSoftExtractor(OWWidget):
         
         return platform_data
 
-    def parse_soft_file_directly(self, filename, substrings):
-        """Parse SOFT file directly to extract sample info and expression data"""
+    def parse_soft_file_directly(self, filename, substring):
+        """Parse SOFT file directly to extract sample info and expression data (handles .soft and .soft.gz)"""
         matching_samples = {}
         sample_characteristics = {}
         current_sample = None
         current_sample_title = None
         in_sample_table = False
         sample_data = defaultdict(dict)
-
-        substring_list = [s.strip() for s in substrings.lower().split(',') if s.strip()]
         
         try:
-            with open(filename, 'r') as f:
+            with self.open_file(filename) as f:
                 for line in f:
                     line = line.strip()
                     
@@ -391,14 +449,9 @@ class OWGeoSoftExtractor(OWWidget):
                     # Get sample title/description
                     elif current_sample and line.startswith('!Sample_title'):
                         title = line.split('=')[1].strip() if '=' in line else ""
-                        if len(substring_list) == 0:
+                        if substring.lower() in title.lower():
                             current_sample_title = title
-                            self.log_message(f"Found sample: {current_sample} - {title}")
-                        else:
-                            for substring in substring_list:
-                                if substring.lower() in title.lower():
-                                    current_sample_title = title
-                                    self.log_message(f"Found matching sample: {current_sample} - {title}")
+                            self.log_message(f"Found matching sample: {current_sample} - {title}")
                             
                     # Get sample characteristics
                     elif current_sample and current_sample_title and line.startswith('!Sample_characteristics_ch1'):
@@ -437,31 +490,36 @@ class OWGeoSoftExtractor(OWWidget):
         return matching_samples, sample_characteristics
 
     def extract_data(self):
-        if not self.soft_file_path or not os.path.exists(self.soft_file_path):
+        file_path = self.get_absolute_path(self.soft_file_path)
+        if not self.soft_file_path or not os.path.exists(file_path):
             self.log_message("Please select a valid SOFT file")
             return
             
-        # if not self.sample_substrings.strip():
-        #     self.log_message("Please enter a sample substring")
-        #     return
+        if not self.sample_substring.strip():
+            self.log_message("Please enter a sample substring")
+            return
 
         # Clear previous results
         self.log_area.clear()
-        self.log_message(f"Parsing SOFT file for samples containing '{self.sample_substrings}'...")
+        self.log_message(f"Parsing SOFT file for samples containing '{self.sample_substring}'...")
+        
+        # Detect if file is gzipped
+        if file_path.endswith('.gz'):
+            self.log_message("Detected gzipped file, extracting...")
         
         # First, parse platform data for Entrez IDs
         self.log_message("Parsing platform annotation data...")
-        self.platform_data = self.parse_platform_data(self.soft_file_path)
+        self.platform_data = self.parse_platform_data(file_path)
         self.log_message(f"Found Entrez IDs for {len(self.platform_data)} probes")
         
         # Highlight matching samples in the list
         self.highlight_matching_samples()
         
         # Parse the file
-        expression_data, sample_characteristics = self.parse_soft_file_directly(self.soft_file_path, self.sample_substrings)
+        expression_data, sample_characteristics = self.parse_soft_file_directly(file_path, self.sample_substring)
         
         if not expression_data:
-            self.log_message(f"No samples found containing substring '{self.sample_substrings}'")
+            self.log_message(f"No samples found containing substring '{self.sample_substring}'")
             self.Outputs.data.send(None)
             return
         
@@ -485,26 +543,19 @@ class OWGeoSoftExtractor(OWWidget):
 
     def highlight_matching_samples(self):
         """Highlight samples in the list that match the current substring"""
-        # if not self.sample_substrings.strip():
-        #     return
+        if not self.sample_substring.strip():
+            return
             
-        substring_lower = self.sample_substrings.lower()
-        substrings = [s.strip() for s in substring_lower.split(',') if s.strip()]
-
-        self.log_message(f"Parsing {len(substrings)} sample substrings")
-
+        substring_lower = self.sample_substring.lower()
+        
         for i in range(self.sample_list.count()):
             item = self.sample_list.item(i)
-            item.setBackground(item.listWidget().palette().base())
-            item.setForeground(item.listWidget().palette().text())
-            if len(substrings) == 0:
+            if substring_lower in item.text().lower():
                 item.setBackground(item.listWidget().palette().highlight())
                 item.setForeground(item.listWidget().palette().highlightedText())
             else:
-                for ss in substrings:
-                    if ss in item.text().lower():
-                        item.setBackground(item.listWidget().palette().highlight())
-                        item.setForeground(item.listWidget().palette().highlightedText())
+                item.setBackground(item.listWidget().palette().base())
+                item.setForeground(item.listWidget().palette().text())
 
     def create_orange_table(self, expression_data, all_genes, sample_characteristics):
         """Convert expression data to Orange Table format"""
@@ -531,7 +582,7 @@ class OWGeoSoftExtractor(OWWidget):
             attributes.append(var)
         
         # Gene ID as "genes" and Entrez ID as meta attributes
-        metas = [StringVariable("genes"), StringVariable("Entrez ID"), StringVariable("Gene Symbol")]
+        metas = [StringVariable("genes"), StringVariable("Entrez ID")]
         
         domain = Domain(attributes, metas=metas)
         
@@ -561,33 +612,23 @@ class OWGeoSoftExtractor(OWWidget):
         # Create meta data (gene IDs and Entrez IDs)
         gene_ids = np.array(all_genes).reshape(-1, 1)
         entrez_ids = []
-        gene_symbols = []
         
         for gene_id in all_genes:
-            gene_data = self.platform_data.get(gene_id, {})
-            entrez_id = gene_data.get('entrez_id', "")
-            gene_symbol = gene_data.get('gene_symbol', "")
+            entrez_id = self.platform_data.get(gene_id, "")
             entrez_ids.append(entrez_id)
-            gene_symbols.append(gene_symbol)
         
         entrez_ids = np.array(entrez_ids).reshape(-1, 1)
-        gene_symbols = np.array(gene_symbols).reshape(-1, 1)
-        metas_data = np.hstack([gene_ids, entrez_ids, gene_symbols])
+        metas_data = np.hstack([gene_ids, entrez_ids])
         
         # Create Orange Table
         table = Table.from_numpy(domain, X, metas=metas_data)
         
         # Set the table name
-        if self.table_name:
-            table.name = self.table_name
+        if self.table_name.strip():
+            table.name = self.table_name.strip()
         else:
             table.name = "GEO Expression Data"
-
-        table.attributes = {
-            "taxonomy_id": self.taxonomy_id,
-            "gene_as_attribute_name": False,
-            "gene_id_column": "Entrez ID"
-        }
+        
         self.log_message(f"Created Orange Table '{table.name}': {n_genes} genes x {n_samples} samples")
         self.log_message(f"Non-missing values: {np.count_nonzero(~np.isnan(X))}")
         entrez_count = np.count_nonzero([e for e in entrez_ids.flatten() if e])
