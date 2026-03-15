@@ -32,6 +32,7 @@ class OWElementsPairing(OWWidget):
     source_column = settings.Setting("")
     target_column = settings.Setting("")
     aggregation_methods = settings.Setting({})  # Dict: column_name -> method
+    auto_generate = settings.Setting(True)  # New setting for automatic generation
     
     # Available aggregation methods
     AGG_METHODS = [
@@ -51,6 +52,7 @@ class OWElementsPairing(OWWidget):
         self.data = None
         self.numeric_columns = []
         self.aggregation_combos = {}
+        self._first_auto_generate = True  # Track first automatic generation
         
         # GUI
         box = gui.widgetBox(self.controlArea, "Column Selection")
@@ -69,6 +71,13 @@ class OWElementsPairing(OWWidget):
             label="Target column:",
             callback=self.on_source_target_changed,
             sendSelectedValue=True
+        )
+        
+        # Auto-generate checkbox
+        gui.checkBox(
+            box, self, "auto_generate",
+            label="Generate Automatically",
+            callback=self.on_auto_generate_changed
         )
         
         # Aggregation settings box with scroll area
@@ -124,6 +133,11 @@ class OWElementsPairing(OWWidget):
         self.update_aggregation_controls()
         self.update_info()
         self.process_button.setEnabled(True)
+        
+        # Auto-generate on first load or when auto_generate is enabled
+        if self.auto_generate and self._first_auto_generate:
+            self._first_auto_generate = False
+            self.process_data()
     
     def clear_combos(self):
         self.source_combo.clear()
@@ -243,7 +257,7 @@ class OWElementsPairing(OWWidget):
     def on_aggregation_changed(self, column_name, method):
         """Save aggregation method when changed"""
         self.aggregation_methods[column_name] = method
-        if self.data is not None:
+        if self.data is not None and self.auto_generate:
             self.process_data()
     
     def on_source_target_changed(self):
@@ -251,6 +265,12 @@ class OWElementsPairing(OWWidget):
         if self.data is not None:
             self.update_numeric_columns()
             self.update_aggregation_controls()
+            if self.auto_generate:
+                self.process_data()
+    
+    def on_auto_generate_changed(self):
+        """Handle auto-generate checkbox change"""
+        if self.auto_generate and self.data is not None:
             self.process_data()
     
     def update_info(self):
@@ -344,6 +364,132 @@ class OWElementsPairing(OWWidget):
             self.Outputs.data.send(None)
             return
         
+        # Check if there are numeric columns to aggregate
+        has_numeric = len(self.numeric_columns) > 0
+        
+        if has_numeric:
+            # Original logic with aggregation
+            output_table = self._process_with_aggregation(source_data, target_data)
+        else:
+            # New logic without aggregation - just pair sources that share targets
+            output_table = self._process_without_aggregation(source_data, target_data)
+        
+        if output_table is None:
+            self.Error.no_pairs()
+            self.Outputs.data.send(None)
+        else:
+            self.Outputs.data.send(output_table)
+    
+    def _process_without_aggregation(self, source_data, target_data):
+        """Process pairing when there are no numeric columns to aggregate"""
+        # Build structure: source -> set of targets
+        source_targets = defaultdict(set)
+        
+        for i in range(len(self.data)):
+            source_val = source_data[i]
+            target_val = target_data[i]
+            
+            # Skip missing values
+            if isinstance(source_val, (int, float)) and np.isnan(source_val):
+                continue
+            if source_val == "" or source_val is None:
+                continue
+            if isinstance(target_val, (int, float)) and np.isnan(target_val):
+                continue
+            if target_val == "" or target_val is None:
+                continue
+            
+            source_targets[source_val].add(target_val)
+        
+        # Find pairs of sources that share targets
+        all_sources = list(source_targets.keys())
+        pairs = []
+        shared_targets_list = []
+        
+        for source1, source2 in combinations(all_sources, 2):
+            targets1 = source_targets[source1]
+            targets2 = source_targets[source2]
+            shared = targets1 & targets2
+            
+            if shared:
+                pairs.append([source1, source2])
+                shared_targets_list.append(len(shared))
+        
+        if not pairs:
+            return None
+        
+        # Create output table
+        pairs_array = np.array(pairs, dtype=object)
+        
+        # Determine variable types based on source column
+        source_var = self._get_variable_by_name(self.source_column)
+        
+        # Create variables for the output table
+        metas = []
+        attributes = []
+        
+        # Source columns
+        if isinstance(source_var, DiscreteVariable):
+            source1_var = DiscreteVariable("Source1", values=source_var.values)
+            source2_var = DiscreteVariable("Source2", values=source_var.values)
+            metas.extend([source1_var, source2_var])
+        elif isinstance(source_var, ContinuousVariable):
+            source1_var = ContinuousVariable("Source1")
+            source2_var = ContinuousVariable("Source2")
+            attributes.extend([source1_var, source2_var])
+        else:
+            # String or other type
+            source1_var = StringVariable("Source1")
+            source2_var = StringVariable("Source2")
+            metas.extend([source1_var, source2_var])
+        
+        # Add shared targets count as an attribute
+        shared_count_var = ContinuousVariable("Shared_Targets_Count")
+        attributes.append(shared_count_var)
+        
+        # Prepare data arrays
+        X_data = []
+        metas_data = []
+        
+        for i, pair in enumerate(pairs):
+            row_attrs = []
+            row_metas = []
+            
+            # Handle source columns
+            if isinstance(source_var, StringVariable) or source_var is None:
+                row_metas.extend(pair)
+            elif isinstance(source_var, DiscreteVariable):
+                try:
+                    idx1 = source_var.values.index(str(pair[0]))
+                    idx2 = source_var.values.index(str(pair[1]))
+                    row_metas.extend([idx1, idx2])
+                except ValueError:
+                    row_metas.extend([np.nan, np.nan])
+            else:
+                row_attrs.extend(pair)
+            
+            # Add shared targets count
+            row_attrs.append(shared_targets_list[i])
+            
+            X_data.append(row_attrs)
+            metas_data.append(row_metas)
+        
+        # Create domain and table
+        domain = Domain(attributes, metas=metas)
+        
+        X_array = np.array(X_data, dtype=float) if X_data and X_data[0] else np.empty((len(pairs), 0))
+        metas_array = np.array(metas_data, dtype=object) if metas_data and metas_data[0] else np.empty((len(pairs), 0))
+        
+        output_table = Table.from_numpy(
+            domain=domain,
+            X=X_array,
+            metas=metas_array
+        )
+        
+        return output_table
+    
+    def _process_with_aggregation(self, source_data, target_data):
+        """Original processing logic with aggregation"""
         # Get numeric column data
         numeric_data = {}
         for col_name in self.numeric_columns:
@@ -372,7 +518,6 @@ class OWElementsPairing(OWWidget):
                 source_target_data[source_val][target_val][col_name].append(value)
         
         # Now build pairs: find sources that share targets
-        # Structure: (source1, source2) -> list of shared targets -> numeric values
         pair_data = defaultdict(lambda: defaultdict(lambda: {col: [] for col in self.numeric_columns}))
         
         # Get all sources
@@ -398,16 +543,14 @@ class OWElementsPairing(OWWidget):
                         agg1 = self.apply_aggregation(values1, method)
                         agg2 = self.apply_aggregation(values2, method)
                         
-                        # Combine the two aggregated values (e.g., mean of the two means)
+                        # Combine the two aggregated values
                         combined = self.apply_aggregation([agg1, agg2], method)
                         
                         # Store for this pair and target
                         pair_data[(source1, source2)][target][col_name] = combined
         
         if not pair_data:
-            self.Error.no_pairs()
-            self.Outputs.data.send(None)
-            return
+            return None
         
         # Now aggregate across all shared targets for each pair
         pairs = []
@@ -431,19 +574,7 @@ class OWElementsPairing(OWWidget):
         pairs_array = np.array(pairs, dtype=object)
         
         # Determine variable types based on source column
-        source_var = None
-        for attr in self.data.domain.attributes:
-            if attr.name == self.source_column:
-                source_var = attr
-                break
-        if source_var is None:
-            for meta in self.data.domain.metas:
-                if meta.name == self.source_column:
-                    source_var = meta
-                    break
-        if source_var is None and self.data.domain.class_var and \
-           self.data.domain.class_var.name == self.source_column:
-            source_var = self.data.domain.class_var
+        source_var = self._get_variable_by_name(self.source_column)
         
         # Create variables for the output table
         metas = []
@@ -510,7 +641,19 @@ class OWElementsPairing(OWWidget):
             metas=metas_array
         )
         
-        self.Outputs.data.send(output_table)
+        return output_table
+    
+    def _get_variable_by_name(self, name):
+        """Helper to get variable object by name"""
+        for attr in self.data.domain.attributes:
+            if attr.name == name:
+                return attr
+        for meta in self.data.domain.metas:
+            if meta.name == name:
+                return meta
+        if self.data.domain.class_var and self.data.domain.class_var.name == name:
+            return self.data.domain.class_var
+        return None
 
 
 # For testing purposes
