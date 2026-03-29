@@ -52,6 +52,7 @@ class OWGeoSoftExtractor(OWWidget):
         # Internal variables
         self.expression_data = None
         self.all_sample_titles = []
+        self.all_sample_characteristics_dict = {}
         self.gene_info = {}  # Store combined gene information (Entrez ID and Gene Symbol)
 
     def setup_gui(self):
@@ -146,6 +147,7 @@ class OWGeoSoftExtractor(OWWidget):
         self.sample_list = QListWidget()
         self.sample_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.sample_list.itemDoubleClicked.connect(self.on_sample_double_clicked)
+        self.sample_list.itemSelectionChanged.connect(self.on_sample_selection_changed)
         right_panel.layout().addWidget(self.sample_list)
         
         # Add a label for instructions
@@ -254,6 +256,43 @@ class OWGeoSoftExtractor(OWWidget):
         
         self.log_message(f"Selected substring: '{self.sample_substring}' from sample: {sample_text}")
 
+    def on_sample_selection_changed(self):
+        """Update characteristics list based on currently selected samples"""
+        selected_sample_ids = []
+        for item in self.sample_list.selectedItems():
+            item_text = item.text()
+            if '(' in item_text and item_text.endswith(')'):
+                sample_id = item_text.split('(')[-1][:-1]
+                selected_sample_ids.append(sample_id)
+        
+        self.update_characteristics_list(selected_sample_ids)
+
+    def update_characteristics_list(self, selected_sample_ids):
+        """Update the characteristics checklist to only show characteristics that have values in the given samples"""
+        if not hasattr(self, 'all_sample_characteristics_dict') or not self.all_sample_characteristics_dict:
+            return
+            
+        self.characteristics_list.clear()
+        
+        if not selected_sample_ids:
+            return
+            
+        valid_characteristics = set()
+        
+        # Filter by only selected samples
+        for sample in selected_sample_ids:
+            if sample in self.all_sample_characteristics_dict:
+                parsed_chars = self.all_sample_characteristics_dict[sample]
+                for k, v in parsed_chars.items():
+                    if k != 'class' and v and v.strip():
+                        valid_characteristics.add(k)
+                        
+        for char_label in sorted(list(valid_characteristics)):
+            item = QListWidgetItem(char_label)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            self.characteristics_list.addItem(item)
+
     def parse_substrings(self, substring_input):
         """Parse comma-separated substrings and return a list"""
         if not substring_input or not substring_input.strip():
@@ -274,6 +313,7 @@ class OWGeoSoftExtractor(OWWidget):
             self.log_message("Please enter one or more sample substrings first")
             return
         
+        self.sample_list.blockSignals(True)
         # Clear any previous selections
         self.sample_list.clearSelection()
         
@@ -290,6 +330,9 @@ class OWGeoSoftExtractor(OWWidget):
                     item.setSelected(True)
                     matching_count += 1
                     break  # No need to check other substrings for this item
+                    
+        self.sample_list.blockSignals(False)
+        self.on_sample_selection_changed()
         
         if matching_count > 0:
             if len(substrings) == 1:
@@ -335,12 +378,7 @@ class OWGeoSoftExtractor(OWWidget):
                 self.sample_list.addItem(display_text)
                 
             # Populate characteristics list
-            self.characteristics_list.clear()
-            for char_label in all_characteristics:
-                item = QListWidgetItem(char_label)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Checked)
-                self.characteristics_list.addItem(item)
+            self.update_characteristics_list([])
             
             self.log_message(f"Loaded {len(sample_titles)} sample titles and {len(all_characteristics)} characteristics")
             self.extract_button.setEnabled(True)
@@ -431,14 +469,16 @@ class OWGeoSoftExtractor(OWWidget):
                     current_sample = None # stop collecting for this sample
                     
         # Now parse all characteristics to get unique labels
-        all_characteristics = set()
+        valid_characteristics = set()
+        self.all_sample_characteristics_dict = {}
         for sample, char_list in sample_characteristics_dict.items():
             parsed_chars = self.parse_sample_characteristics(char_list)
-            for k in parsed_chars.keys():
-                if k != 'class':
-                    all_characteristics.add(k)
+            self.all_sample_characteristics_dict[sample] = parsed_chars
+            for k, v in parsed_chars.items():
+                if k != 'class' and v and v.strip():
+                    valid_characteristics.add(k)
                     
-        return sample_titles, sorted(list(all_characteristics))
+        return sample_titles, sorted(list(valid_characteristics))
 
     def parse_sample_characteristics(self, characteristics_list):
         """Parse sample characteristics into label-value pairs"""
@@ -772,11 +812,14 @@ class OWGeoSoftExtractor(OWWidget):
             return
         
         # Get selected characteristics
-        selected_characteristics = []
-        for i in range(self.characteristics_list.count()):
-            item = self.characteristics_list.item(i)
-            if item.checkState() == Qt.Checked:
-                selected_characteristics.append(item.text())
+        if self.characteristics_list.count() > 0:
+            selected_characteristics = []
+            for i in range(self.characteristics_list.count()):
+                item = self.characteristics_list.item(i)
+                if item.checkState() == Qt.Checked:
+                    selected_characteristics.append(item.text())
+        else:
+            selected_characteristics = None
                 
         # Create Orange Table
         self.create_orange_table(expression_data, all_genes, sample_characteristics, selected_characteristics)
