@@ -58,8 +58,8 @@ class OWGeoSoftExtractor(OWWidget):
         self.all_sample_characteristics_dict = {}
         self.gene_info = {}  # Store combined gene information (Entrez ID and Gene Symbol)
         
-        if self.auto_commit and self.soft_file_path:
-            QTimer.singleShot(0, self.commit.now)
+        if self.soft_file_path:
+            QTimer.singleShot(0, self._initialize_ui_and_commit)
 
     def setup_gui(self):
         # Main layout with splitter
@@ -183,6 +183,13 @@ class OWGeoSoftExtractor(OWWidget):
         # Set splitter proportions
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
+
+    def _initialize_ui_and_commit(self):
+        if self.soft_file_path:
+            self.load_sample_titles()
+            self.select_from_list()
+            if self.auto_commit:
+                self.commit.now()
 
     def on_characteristic_checked(self):
         # Update setting based on current check states
