@@ -40,6 +40,9 @@ class OWGeoSoftExtractor(OWWidget):
     class Outputs:
         data = Output("Data", Table)
 
+    want_main_area = False
+    resizing_enabled = False
+
     def __init__(self):
         super().__init__()
         
