@@ -955,20 +955,26 @@ class OWGeoSoftExtractor(OWWidget):
         entrez_ids = []
         
         for gene_id in all_genes:
-            gene_ids.append(gene_id)
+            gene_ids.append(gene_id if gene_id else "?")
             
             # Get gene info from the dictionary
             if gene_id in self.gene_info:
-                gene_symbol_list.append(self.gene_info[gene_id]['symbol'])
-                entrez_ids.append(self.gene_info[gene_id]['entrez'])
+                sym = self.gene_info[gene_id].get('symbol', "")
+                ent = self.gene_info[gene_id].get('entrez', "")
+                gene_symbol_list.append(sym if sym else "?")
+                entrez_ids.append(ent if ent else "?")
             else:
-                gene_symbol_list.append("")
-                entrez_ids.append("")
+                gene_symbol_list.append("?")
+                entrez_ids.append("?")
         
-        gene_ids = np.array(gene_ids).reshape(-1, 1)
-        gene_symbol_array = np.array(gene_symbol_list).reshape(-1, 1)
-        entrez_ids_array = np.array(entrez_ids).reshape(-1, 1)
-        metas_data = np.hstack([gene_ids, gene_symbol_array, entrez_ids_array])
+        gene_ids_array = np.array(gene_ids, dtype=object).reshape(-1, 1)
+        gene_symbol_array = np.array(gene_symbol_list, dtype=object).reshape(-1, 1)
+        entrez_ids_array = np.array(entrez_ids, dtype=object).reshape(-1, 1)
+        metas_data = np.hstack([gene_ids_array, gene_symbol_array, entrez_ids_array])
+        
+        # Post-processing: replacing any remaining empty values with '?' symbol
+        metas_data[metas_data == ""] = "?"
+        metas_data[metas_data == None] = "?"
         
         # Create Orange Table
         table = Table.from_numpy(domain, X, metas=metas_data)
