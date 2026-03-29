@@ -31,6 +31,11 @@ class OWGeoSoftExtractor(OWWidget):
     transform_log2 = Setting(False)
     relative_to_workflow = Setting(False)
     
+    # Table attributes settings
+    taxonomy_id_setting = Setting("9606")
+    gene_as_attribute_name = Setting(False)
+    gene_id_column = Setting(0)
+    
     # Outputs
     class Outputs:
         data = Output("Data", Table)
@@ -101,6 +106,12 @@ class OWGeoSoftExtractor(OWWidget):
         
         # Log2 transform checkbox
         gui.checkBox(left_panel, self, "transform_log2", "Transform log2 to actual values")
+        
+        # Table Metadata box
+        metadata_box = gui.widgetBox(left_panel, "Table Metadata")
+        self.tax_id_edit = gui.lineEdit(metadata_box, self, "taxonomy_id_setting", "taxonomy_id:")
+        gui.checkBox(metadata_box, self, "gene_as_attribute_name", "gene_as_attribute_name")
+        self.gene_id_combo = gui.comboBox(metadata_box, self, "gene_id_column", label="gene_id_column:", items=["genes", "Gene Symbol", "Entrez ID"], sendSelectedValue=False)
         
         # Extract button
         self.extract_button = QPushButton("Extract Expression Data")
@@ -391,6 +402,17 @@ class OWGeoSoftExtractor(OWWidget):
             for line in f:
                 line = line.strip()
                 
+                # Check for taxonomy ID
+                if line.startswith('!Series_platform_taxid') or line.startswith('!Platform_taxid') or line.startswith('!Sample_taxid_ch1'):
+                    tax_id = line.split('=')[1].strip() if '=' in line else None
+                    if tax_id:
+                        self.taxonomy_id_setting = tax_id
+                        try:
+                            if hasattr(self, 'tax_id_edit'):
+                                self.tax_id_edit.setText(tax_id)
+                        except Exception:
+                            pass
+                
                 if line.startswith('^SAMPLE'):
                     current_sample = line.split('=')[1].strip() if '=' in line else None
                     
@@ -451,8 +473,8 @@ class OWGeoSoftExtractor(OWWidget):
         in_table_header = False
         header_indices = {}
         
-        self.table_name = "GEO Expression Data"
-        self.taxonomy_id = "9606"  # Default to human
+        if not self.table_name.strip():
+            self.table_name = "GEO Expression Data"
         
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
@@ -482,8 +504,8 @@ class OWGeoSoftExtractor(OWWidget):
                         header_indices = {}
                         self.log_message(f"Found platform: {current_platform}")
                         
-                    if line.startswith('!Series_platform_taxid'):
-                        self.taxonomy_id = line.split('=')[1].strip() if '=' in line else self.taxonomy_id
+                    if line.startswith('!Series_platform_taxid') and not getattr(self, "taxonomy_id_setting", None):
+                        self.taxonomy_id_setting = line.split('=')[1].strip() if '=' in line else self.taxonomy_id_setting
 
                     # Check for platform table start
                     elif current_platform and line.startswith('!platform_table_begin'):
@@ -863,6 +885,17 @@ class OWGeoSoftExtractor(OWWidget):
         
         # Create Orange Table
         table = Table.from_numpy(domain, X, metas=metas_data)
+        
+        # Set table attributes (table-level metadata)
+        table.attributes["taxonomy_id"] = str(self.taxonomy_id_setting)
+        table.attributes["gene_as_attribute_name"] = bool(getattr(self, "gene_as_attribute_name", False))
+        
+        meta_options = ["genes", "Gene Symbol", "Entrez ID"]
+        col_idx = getattr(self, "gene_id_column", 0)
+        if col_idx >= 0 and col_idx < len(meta_options):
+            table.attributes["gene_id_column"] = meta_options[col_idx]
+        else:
+            table.attributes["gene_id_column"] = "genes"
         
         # Set the table name
         if self.table_name.strip():
