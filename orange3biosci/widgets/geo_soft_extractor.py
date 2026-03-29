@@ -9,7 +9,7 @@ import urllib.request
 import tempfile
 
 from AnyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFileDialog, QTextEdit, QListWidget, QSplitter, QAbstractItemView, QProgressBar, QListWidgetItem
-from AnyQt.QtCore import Qt
+from AnyQt.QtCore import Qt, QTimer
 
 from Orange.widgets.widget import OWWidget, Input, Output
 from Orange.widgets.settings import Setting
@@ -43,6 +43,9 @@ class OWGeoSoftExtractor(OWWidget):
     want_main_area = False
     resizing_enabled = False
 
+    auto_commit = Setting(False)
+    selected_characteristics_setting = Setting(None)
+
     def __init__(self):
         super().__init__()
         
@@ -54,6 +57,9 @@ class OWGeoSoftExtractor(OWWidget):
         self.all_sample_titles = []
         self.all_sample_characteristics_dict = {}
         self.gene_info = {}  # Store combined gene information (Entrez ID and Gene Symbol)
+        
+        if self.auto_commit and self.soft_file_path:
+            QTimer.singleShot(0, self.commit.now)
 
     def setup_gui(self):
         # Main layout with splitter
@@ -106,22 +112,21 @@ class OWGeoSoftExtractor(OWWidget):
         substring_box.layout().addWidget(self.select_button)
         
         # Table name input
-        gui.lineEdit(left_panel, self, "table_name", "Output Table Name:")
+        gui.lineEdit(left_panel, self, "table_name", "Output Table Name:", callback=self.commit.deferred)
         
         # Log2 transform checkbox
-        gui.checkBox(left_panel, self, "transform_log2", "Transform log2 to actual values")
+        gui.checkBox(left_panel, self, "transform_log2", "Transform log2 to actual values", callback=self.commit.deferred)
         
         # Table Metadata box
         metadata_box = gui.widgetBox(left_panel, "Table Metadata")
-        self.tax_id_edit = gui.lineEdit(metadata_box, self, "taxonomy_id_setting", "taxonomy_id:")
-        gui.checkBox(metadata_box, self, "gene_as_attribute_name", "gene_as_attribute_name")
-        self.gene_id_combo = gui.comboBox(metadata_box, self, "gene_id_column", label="gene_id_column:", items=["genes", "Gene Symbol", "Entrez ID"], sendSelectedValue=False)
+        self.tax_id_edit = gui.lineEdit(metadata_box, self, "taxonomy_id_setting", "taxonomy_id:", callback=self.commit.deferred)
+        gui.checkBox(metadata_box, self, "gene_as_attribute_name", "gene_as_attribute_name", callback=self.commit.deferred)
+        self.gene_id_combo = gui.comboBox(metadata_box, self, "gene_id_column", label="gene_id_column:", items=["genes", "Gene Symbol", "Entrez ID"], sendSelectedValue=False, callback=self.commit.deferred)
         
-        # Extract button
-        self.extract_button = QPushButton("Extract Expression Data")
-        self.extract_button.clicked.connect(self.extract_data)
-        self.extract_button.setEnabled(False)
-        left_panel.layout().addWidget(self.extract_button)
+        # Extract button (auto commit)
+        self.auto_commit_widget = gui.auto_commit(
+            left_panel, self, 'auto_commit', label="Send Extraction", checkbox_label="Send Automatically", box=False
+        )
         
         # Status/log area
         self.log_area = QTextEdit()
@@ -167,10 +172,27 @@ class OWGeoSoftExtractor(OWWidget):
         char_instruction.setWordWrap(True)
         char_instruction.setStyleSheet("color: gray; font-size: 10px;")
         char_panel.layout().addWidget(char_instruction)
+
+        # Connect characteristic changes to save setting
+        self.characteristics_list.itemChanged.connect(self.on_characteristic_checked)
+        
+        # Set splitter proportions (75% to 25%)
+        right_splitter.setStretchFactor(0, 3)
+        right_splitter.setStretchFactor(1, 1)
         
         # Set splitter proportions
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
+
+    def on_characteristic_checked(self):
+        # Update setting based on current check states
+        self.selected_characteristics_setting = []
+        for i in range(self.characteristics_list.count()):
+            item = self.characteristics_list.item(i)
+            if item.checkState() == Qt.Checked:
+                self.selected_characteristics_setting.append(item.text())
+        
+        self.commit.deferred()
 
     def browse_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -266,6 +288,7 @@ class OWGeoSoftExtractor(OWWidget):
                 selected_sample_ids.append(sample_id)
         
         self.update_characteristics_list(selected_sample_ids)
+        self.commit.deferred()
 
     def update_characteristics_list(self, selected_sample_ids):
         """Update the characteristics checklist to only show characteristics that have values in the given samples"""
@@ -287,11 +310,19 @@ class OWGeoSoftExtractor(OWWidget):
                     if k != 'class' and v and v.strip():
                         valid_characteristics.add(k)
                         
+        self.characteristics_list.blockSignals(True)
         for char_label in sorted(list(valid_characteristics)):
             item = QListWidgetItem(char_label)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked)
+            
+            # Use saved settings 
+            if self.selected_characteristics_setting is None or char_label in self.selected_characteristics_setting:
+                item.setCheckState(Qt.Checked)
+            else:
+                item.setCheckState(Qt.Unchecked)
+                
             self.characteristics_list.addItem(item)
+        self.characteristics_list.blockSignals(False)
 
     def parse_substrings(self, substring_input):
         """Parse comma-separated substrings and return a list"""
@@ -381,7 +412,6 @@ class OWGeoSoftExtractor(OWWidget):
             self.update_characteristics_list([])
             
             self.log_message(f"Loaded {len(sample_titles)} sample titles and {len(all_characteristics)} characteristics")
-            self.extract_button.setEnabled(True)
             self.select_button.setEnabled(True)
             
         except Exception as e:
@@ -741,7 +771,9 @@ class OWGeoSoftExtractor(OWWidget):
         
         return matching_samples, sample_characteristics
 
-    def extract_data(self):
+    @gui.deferred
+    def commit(self):
+        """Extract data based on current settings and selections"""
         file_path = self.get_absolute_path(self.soft_file_path)
         if not self.soft_file_path:
             self.log_message("Please select a valid SOFT file")
@@ -818,6 +850,8 @@ class OWGeoSoftExtractor(OWWidget):
                 item = self.characteristics_list.item(i)
                 if item.checkState() == Qt.Checked:
                     selected_characteristics.append(item.text())
+        elif self.selected_characteristics_setting is not None:
+            selected_characteristics = self.selected_characteristics_setting
         else:
             selected_characteristics = None
                 
