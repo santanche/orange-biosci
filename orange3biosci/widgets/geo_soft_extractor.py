@@ -8,7 +8,7 @@ from pkg_resources import resource_filename
 import urllib.request
 import tempfile
 
-from AnyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFileDialog, QTextEdit, QListWidget, QSplitter, QAbstractItemView, QProgressBar
+from AnyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFileDialog, QTextEdit, QListWidget, QSplitter, QAbstractItemView, QProgressBar, QListWidgetItem
 from AnyQt.QtCore import Qt
 
 from Orange.widgets.widget import OWWidget, Input, Output
@@ -120,9 +120,13 @@ class OWGeoSoftExtractor(OWWidget):
         self.progress_bar.setVisible(False)
         progress_box.layout().addWidget(self.progress_bar)
         
+        # Right vertical splitter
+        right_splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(right_splitter)
+        
         # Right panel - sample list
         right_panel = gui.widgetBox(None, "Available Sample Titles")
-        splitter.addWidget(right_panel)
+        right_splitter.addWidget(right_panel)
         
         # Sample list widget with multi-selection enabled
         self.sample_list = QListWidget()
@@ -135,6 +139,18 @@ class OWGeoSoftExtractor(OWWidget):
         instruction_label.setWordWrap(True)
         instruction_label.setStyleSheet("color: gray; font-size: 10px;")
         right_panel.layout().addWidget(instruction_label)
+        
+        # Available Characteristics panel
+        char_panel = gui.widgetBox(None, "Selected Characteristics for Columns")
+        right_splitter.addWidget(char_panel)
+        
+        self.characteristics_list = QListWidget()
+        char_panel.layout().addWidget(self.characteristics_list)
+        
+        char_instruction = QLabel("Select characteristics to include as attributes in the extracted table.")
+        char_instruction.setWordWrap(True)
+        char_instruction.setStyleSheet("color: gray; font-size: 10px;")
+        char_panel.layout().addWidget(char_instruction)
         
         # Set splitter proportions
         splitter.setStretchFactor(0, 1)
@@ -292,7 +308,7 @@ class OWGeoSoftExtractor(OWWidget):
         self.all_sample_titles = []
         
         try:
-            sample_titles = self.get_all_sample_titles(file_path)
+            sample_titles, all_characteristics = self.get_all_sample_titles_and_characteristics(file_path)
             
             # Sort alphabetically by title (not by accession)
             sample_titles.sort(key=lambda x: x[1].lower())
@@ -303,8 +319,16 @@ class OWGeoSoftExtractor(OWWidget):
             for sample_id, title in sample_titles:
                 display_text = f"{title} ({sample_id})"
                 self.sample_list.addItem(display_text)
+                
+            # Populate characteristics list
+            self.characteristics_list.clear()
+            for char_label in all_characteristics:
+                item = QListWidgetItem(char_label)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked)
+                self.characteristics_list.addItem(item)
             
-            self.log_message(f"Loaded {len(sample_titles)} sample titles (sorted alphabetically)")
+            self.log_message(f"Loaded {len(sample_titles)} sample titles and {len(all_characteristics)} characteristics")
             self.extract_button.setEnabled(True)
             self.select_button.setEnabled(True)
             
@@ -357,26 +381,39 @@ class OWGeoSoftExtractor(OWWidget):
         else:
             return open(filename, 'r', encoding='utf-8', errors='ignore')
     
-    def get_all_sample_titles(self, filename):
-        """Extract all sample titles from SOFT file (handles .soft and .soft.gz)"""
+    def get_all_sample_titles_and_characteristics(self, filename):
+        """Extract all sample titles and unique characteristic from SOFT file"""
         sample_titles = []
+        sample_characteristics_dict = defaultdict(list)
         current_sample = None
         
         with self.open_file(filename) as f:
             for line in f:
                 line = line.strip()
                 
-                # Check for sample start
                 if line.startswith('^SAMPLE'):
                     current_sample = line.split('=')[1].strip() if '=' in line else None
                     
-                # Get sample title/description
                 elif current_sample and line.startswith('!Sample_title'):
                     title = line.split('=')[1].strip() if '=' in line else ""
                     sample_titles.append((current_sample, title))
-                    current_sample = None  # Reset to avoid duplicates
-        
-        return sample_titles
+                    
+                elif current_sample and line.startswith('!Sample_characteristics_ch1'):
+                    characteristics = line.split('=')[1].strip() if '=' in line else ""
+                    sample_characteristics_dict[current_sample].append(characteristics)
+
+                elif current_sample and line.startswith('!sample_table_begin'):
+                    current_sample = None # stop collecting for this sample
+                    
+        # Now parse all characteristics to get unique labels
+        all_characteristics = set()
+        for sample, char_list in sample_characteristics_dict.items():
+            parsed_chars = self.parse_sample_characteristics(char_list)
+            for k in parsed_chars.keys():
+                if k != 'class':
+                    all_characteristics.add(k)
+                    
+        return sample_titles, sorted(list(all_characteristics))
 
     def parse_sample_characteristics(self, characteristics_list):
         """Parse sample characteristics into label-value pairs"""
@@ -709,8 +746,15 @@ class OWGeoSoftExtractor(OWWidget):
             self.Outputs.data.send(None)
             return
         
+        # Get selected characteristics
+        selected_characteristics = []
+        for i in range(self.characteristics_list.count()):
+            item = self.characteristics_list.item(i)
+            if item.checkState() == Qt.Checked:
+                selected_characteristics.append(item.text())
+                
         # Create Orange Table
-        self.create_orange_table(expression_data, all_genes, sample_characteristics)
+        self.create_orange_table(expression_data, all_genes, sample_characteristics, selected_characteristics)
 
     def highlight_matching_samples(self):
         """Highlight samples in the list that match any of the current substrings"""
@@ -737,7 +781,7 @@ class OWGeoSoftExtractor(OWWidget):
                 item.setBackground(item.listWidget().palette().base())
                 item.setForeground(item.listWidget().palette().text())
 
-    def create_orange_table(self, expression_data, all_genes, sample_characteristics):
+    def create_orange_table(self, expression_data, all_genes, sample_characteristics, selected_characteristics=None):
         """Convert expression data to Orange Table format"""
         
         # Create domain
@@ -753,6 +797,13 @@ class OWGeoSoftExtractor(OWWidget):
             if sample_name in sample_characteristics:
                 characteristics_list = sample_characteristics[sample_name]
                 parsed_chars = self.parse_sample_characteristics(characteristics_list)
+                
+                if selected_characteristics is not None:
+                    # Filter attributes and reconstruct class
+                    filtered_chars = {k: v for k, v in parsed_chars.items() if k in selected_characteristics}
+                    if filtered_chars:
+                        filtered_chars['class'] = '|'.join([filtered_chars[k] for k in sorted(filtered_chars.keys())])
+                    parsed_chars = filtered_chars
                 
                 # Set each characteristic as a separate variable attribute
                 if parsed_chars:
