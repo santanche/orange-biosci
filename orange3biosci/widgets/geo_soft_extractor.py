@@ -4,7 +4,7 @@ import os
 import gzip
 from collections import defaultdict
 import numpy as np
-from pkg_resources import resource_filename
+from importlib.resources import files
 import urllib.request
 import tempfile
 
@@ -20,7 +20,7 @@ from Orange.widgets.utils.widgetpreview import WidgetPreview
 class OWGeoSoftExtractor(OWWidget):
     name = "GEO SOFT Extractor"
     description = "Extract gene expression data from GEO SOFT files by sample substring"
-    icon = resource_filename(__name__, "../icons/soft-extractor-icon.svg")
+    icon = str(files(__name__).parent / "icons/soft-extractor-icon.svg")
     priority = 100
     keywords = ["GEO", "SOFT", "gene", "expression", "extract"]
 

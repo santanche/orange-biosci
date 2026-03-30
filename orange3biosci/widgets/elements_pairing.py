@@ -1,7 +1,7 @@
 import numpy as np
 from collections import defaultdict
 from itertools import combinations
-from pkg_resources import resource_filename
+from importlib.resources import files
 
 from AnyQt.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QWidget, QScrollArea
 from AnyQt.QtCore import Qt
@@ -16,7 +16,7 @@ from Orange.widgets.widget import OWWidget, Input, Output, Msg
 class OWElementsPairing(OWWidget):
     name = "Elements Pairing"
     description = "Generate pairs of sources that share the same target with aggregation support"
-    icon = resource_filename(__name__, "../icons/ElementsPairing.svg")
+    icon = str(files(__name__).parent / "icons/ElementsPairing.svg")
     priority = 10
     
     class Inputs:

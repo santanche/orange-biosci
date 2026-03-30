@@ -7,12 +7,12 @@ from Orange.widgets import gui, widget
 from Orange.widgets.settings import Setting
 from Orange.widgets.widget import Input, Output
 import numpy as np
-from pkg_resources import resource_filename
+from importlib.resources import files
 
 class OWListSplitter(widget.OWWidget):
     name = "List Splitter"
     description = "Split delimited values in a field into multiple rows or filter first/last occurrence"
-    icon = resource_filename(__name__, "../icons/ListSplitter.svg")
+    icon = str(files(__name__).parent / "icons/ListSplitter.svg")
     priority = 10
 
     class Inputs:

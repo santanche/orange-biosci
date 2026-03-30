@@ -5,12 +5,12 @@ from Orange.widgets import gui
 from Orange.widgets.settings import Setting
 from Orange.widgets.widget import OWWidget, Input, Output
 from AnyQt.QtWidgets import QVBoxLayout, QListWidget, QAbstractItemView
-from pkg_resources import resource_filename
+from importlib.resources import files
 
 class OWCustomPivot(OWWidget):
     name = "Pivot Alternative"
     description = "Pivot table transformation with configurable rows, columns, and values"
-    icon = resource_filename(__name__, "../icons/Pivot-alternative.svg")
+    icon = str(files(__name__).parent / "icons/Pivot-alternative.svg")
     priority = 10
 
     class Inputs:
