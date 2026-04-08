@@ -9,7 +9,7 @@ from importlib.resources import files
 class OWSimpleTransposeTable(widget.OWWidget):
     name = "Transpose as String"
     description = "Transpose a data table regardless of field types"
-    icon = str(files(__name__).parent / "icons/Transpose-string.svg")
+    icon = str(files("orange3biosci") / "icons/Transpose-string.svg")
     priority = 10
 
     class Inputs:

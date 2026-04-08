@@ -9,7 +9,7 @@ class OWGeoPreprocessor(widget.OWWidget):
     # Widget metadata
     name = "GEO Preprocessor"
     description = "Preprocess GEO gene differential expression data."
-    icon = str(files(__name__).parent / "icons/preprocessing-icon.svg")
+    icon = str(files("orange3biosci") / "icons/preprocessing-icon.svg")
     priority = 100
     keywords = ["GEO", "gene", "expression", "preprocess"]
 

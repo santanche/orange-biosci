@@ -10,7 +10,7 @@ from importlib.resources import files
 class OWCustomPivot(OWWidget):
     name = "Pivot Alternative"
     description = "Pivot table transformation with configurable rows, columns, and values"
-    icon = str(files(__name__).parent / "icons/Pivot-alternative.svg")
+    icon = str(files("orange3biosci") / "icons/Pivot-alternative.svg")
     priority = 10
 
     class Inputs:

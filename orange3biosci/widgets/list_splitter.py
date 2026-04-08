@@ -12,7 +12,7 @@ from importlib.resources import files
 class OWListSplitter(widget.OWWidget):
     name = "List Splitter"
     description = "Split delimited values in a field into multiple rows or filter first/last occurrence"
-    icon = str(files(__name__).parent / "icons/ListSplitter.svg")
+    icon = str(files("orange3biosci") / "icons/ListSplitter.svg")
     priority = 10
 
     class Inputs:

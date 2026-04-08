@@ -3,7 +3,7 @@ from importlib.resources import files
 # Widgets are registered by category. Let's put it in "Transform"
 NAME = "BioSci"
 DESCRIPTION = "Collection of Bio Science processing widgets."
-ICON = str(files(__name__).parent / "icons" / "biosci-category-icon.svg")
+ICON = str(files("orange3biosci") / "icons" / "biosci-category-icon.svg")
 BACKGROUND = "#9FFFBD"
 
 PRIORITY = 3

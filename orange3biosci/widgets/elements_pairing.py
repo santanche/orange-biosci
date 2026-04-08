@@ -16,7 +16,7 @@ from Orange.widgets.widget import OWWidget, Input, Output, Msg
 class OWElementsPairing(OWWidget):
     name = "Elements Pairing"
     description = "Generate pairs of sources that share the same target with aggregation support"
-    icon = str(files(__name__).parent / "icons/ElementsPairing.svg")
+    icon = str(files("orange3biosci") / "icons/ElementsPairing.svg")
     priority = 10
     
     class Inputs:

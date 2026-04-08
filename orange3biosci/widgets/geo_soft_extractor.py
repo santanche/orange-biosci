@@ -20,7 +20,7 @@ from Orange.widgets.utils.widgetpreview import WidgetPreview
 class OWGeoSoftExtractor(OWWidget):
     name = "GEO SOFT Extractor"
     description = "Extract gene expression data from GEO SOFT files by sample substring"
-    icon = str(files(__name__).parent / "icons/soft-extractor-icon.svg")
+    icon = str(files("orange3biosci") / "icons/soft-extractor-icon.svg")
     priority = 100
     keywords = ["GEO", "SOFT", "gene", "expression", "extract"]
 
