@@ -3,13 +3,13 @@ from Orange.widgets.settings import Setting
 from Orange.data import Table, Domain, StringVariable, DiscreteVariable, ContinuousVariable
 from Orange.widgets.widget import Input, Output
 import numpy as np
-from pkg_resources import resource_filename
+from importlib.resources import files
 
 
 class OWSimpleTransposeTable(widget.OWWidget):
     name = "Transpose as String"
     description = "Transpose a data table regardless of field types"
-    icon = resource_filename(__name__, "../icons/Transpose-string.svg")
+    icon = str(files(__name__).parent / "icons/Transpose-string.svg")
     priority = 10
 
     class Inputs:
