@@ -1,29 +1,22 @@
 """
 Orange3 Widget — STRING-DB Gene Network Query
 ==============================================
-Receives a data table, lets the user pick the gene-ID column, network type
-and species, queries the STRING-DB REST API and outputs a network edge table
-(source, target, score).
-
-Installation
-------------
-Drop this file inside your Orange3 add-on package (or into
-  ~/.local/share/Orange/widgets/
-and restart Orange).  The widget appears under the "Bioinformatics" category.
-
-Dependencies (pip install):
-    requests
-    Orange3
 """
 
 import sys
+import os
+import gzip
+
 import requests
 from importlib.resources import files
 
 from AnyQt.QtWidgets import (
     QLabel, QComboBox, QVBoxLayout, QFormLayout,
-    QSizePolicy, QApplication,
+    QSizePolicy, QApplication, QRadioButton,
+    QHBoxLayout, QPushButton, QFileDialog,
+    QCheckBox, QListWidget
 )
+
 from AnyQt.QtCore import Qt, QThread, pyqtSignal
 
 import Orange.data
@@ -144,6 +137,12 @@ class OWStringDB(OWWidget):
     network_type    = settings.Setting("full")       # "full" | "physical"
     species_taxid   = settings.Setting(9606)         # Homo sapiens by default
 
+    data_source = settings.Setting("api")  # "api" | "file"
+    file_path = settings.Setting("")
+    path_mode = settings.Setting("absolute")  # "absolute" | "relative"
+    selected_fields = settings.Setting([])
+    strip_protein_prefix = settings.Setting(False)
+
     # ---------------------------------------------------------------- species catalogue
     # (taxid, display name) — extend freely
     SPECIES = [
@@ -181,11 +180,70 @@ class OWStringDB(OWWidget):
         form.setLabelAlignment(Qt.AlignRight)
         box.layout().addLayout(form)
 
+        # --- Data source selector ---
+        self._api_radio = QRadioButton("STRING API")
+        self._file_radio = QRadioButton("Local file")
+
+        self._api_radio.setChecked(self.data_source == "api")
+        self._file_radio.setChecked(self.data_source == "file")
+
+        self._api_radio.toggled.connect(self._on_source_changed)
+
+        src_layout = QHBoxLayout()
+        src_layout.addWidget(self._api_radio)
+        src_layout.addWidget(self._file_radio)
+
+        form.addRow("Data source:", src_layout)
+
+        # --- File selector (shown only if "Local file" is selected) ---
+        self._file_edit = gui.lineEdit(self.controlArea, self, "file_path")
+        self._browse_btn = QPushButton("Browse")
+
+        def browse():
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Select STRING file", "", "STRING files (*.gz *.txt)"
+            )
+            if path:
+                self.file_path = path
+                self._file_edit.setText(path)
+
+        self._browse_btn.clicked.connect(browse)
+
+        file_layout = QHBoxLayout()
+        file_layout.addWidget(self._file_edit)
+        file_layout.addWidget(self._browse_btn)
+
+        form.addRow("File:", file_layout)
+
+        # Path mode selector (absolute vs relative) — only relevant if file input is used
+        self._path_cb = QComboBox()
+        self._path_cb.addItems(["Absolute", "Relative to workflow"])
+        self._path_cb.setCurrentIndex(0 if self.path_mode == "absolute" else 1)
+        self._path_cb.currentIndexChanged.connect(
+            lambda i: setattr(self, "path_mode", "absolute" if i == 0 else "relative")
+        )
+
+        form.addRow("Path mode:", self._path_cb)
+
+        # Fields selector (for file input) — user can pick which columns to import
+        self._fields_list = QListWidget()
+        self._fields_list.setSelectionMode(QListWidget.MultiSelection)
+
+        form.addRow("Fields:", self._fields_list)
+
         # Gene column selector
         self._col_cb = QComboBox()
         self._col_cb.setMinimumWidth(160)
         self._col_cb.currentIndexChanged.connect(self._on_col_changed)
         form.addRow("Gene ID column:", self._col_cb)
+
+        self._strip_cb = QCheckBox("Extract only protein_id (remove Taxon.ENSP...)")
+        self._strip_cb.setChecked(self.strip_protein_prefix)
+        self._strip_cb.stateChanged.connect(
+            lambda s: setattr(self, "strip_protein_prefix", bool(s))
+        )
+
+        form.addRow("", self._strip_cb)
 
         # Network type selector
         self._net_cb = QComboBox()
@@ -232,6 +290,54 @@ class OWStringDB(OWWidget):
         self._status_label.setWordWrap(True)
         self._status_label.setStyleSheet("padding: 12px; font-size: 13px;")
         self.mainArea.layout().addWidget(self._status_label)
+
+        self._on_source_changed()
+
+    # file resolution helper — returns absolute path based on current path mode
+    def _resolve_path(self):
+        path = self.file_path
+        if self.path_mode == "relative":
+            # relative to workflow (Orange stores cwd as workflow dir)
+            return os.path.abspath(path)
+        return path
+    
+    # helper to open files, transparently handling gzip if needed
+    def _open_file(self, path):
+        if path.endswith(".gz"):
+            return gzip.open(path, "rt")
+        return open(path, "r")
+    
+    # helper to parse STRING-DB space-delimited files
+    def _parse_string_file(self, path):
+        with self._open_file(path) as f:
+            header = f.readline().strip().split()
+            rows = []
+
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) != len(header):
+                    continue
+                rows.append(dict(zip(header, parts)))
+
+        return header, rows
+    
+    def _load_file_schema(self):
+        path = self._resolve_path()
+        header, _ = self._parse_string_file(path)
+
+        self._fields_list.clear()
+        for h in header:
+            self._fields_list.addItem(h)
+
+    def _get_selected_fields(self):
+        return [item.text() for item in self._fields_list.selectedItems()]
+    
+    def _strip_protein(self, pid):
+        # 9606.ENSP00000000233 → 233
+        try:
+            return pid.split("ENSP")[-1].lstrip("0")
+        except:
+            return pid
 
     # ---------------------------------------------------------------- input handler
     @Inputs.data
@@ -338,10 +444,6 @@ class OWStringDB(OWWidget):
             self.Warning.no_genes()
             return
 
-        if len(genes) > 2000:
-            self.Warning.limit_exceeded()
-            genes = genes[:2000]
-
         self._status_label.setText(
             f"Querying STRING-DB for {len(genes)} gene(s)…\n"
             f"Network: {self.network_type} | "
@@ -349,11 +451,65 @@ class OWStringDB(OWWidget):
         )
         self._query_btn.setEnabled(False)
 
+        if self.data_source == "api":
+            self._run_api_query(genes)
+        else:
+            self._run_file_query(genes)
+        
+    def _run_api_query(self, genes=None):
+        if len(genes) > 2000:
+            self.Warning.limit_exceeded()
+            genes = genes[:2000]
+
         # --- start background worker ------------------------------------
         self._worker = _Worker(genes, self.species_taxid, self.network_type)
         self._worker.finished.connect(self._on_query_done)
         self._worker.errored.connect(self._on_query_error)
         self._worker.start()
+
+    def _run_file_query(self, genes=None):
+        path = self._resolve_path()
+
+        if not path or not os.path.exists(path):
+            self.Error.api_error("Invalid file path")
+            return
+
+        header, rows = self._parse_string_file(path)
+
+        selected = self._get_selected_fields()
+        if not selected:
+            selected = header  # fallback
+
+        # Build Orange domain dynamically
+        metas = []
+        for h in selected:
+            metas.append(Orange.data.StringVariable(h))
+
+        domain = Orange.data.Domain([], metas=metas)
+
+        import numpy as np
+
+        data = []
+        for row in rows:
+            entry = []
+            for h in selected:
+                val = row[h]
+
+                if self.strip_protein_prefix and h in ("protein1", "protein2"):
+                    val = self._strip_protein(val)
+
+                entry.append(val)
+
+            data.append(entry)
+
+        table = Orange.data.Table.from_numpy(
+            domain,
+            X=np.empty((len(data), 0)),
+            metas=np.array(data, dtype=object),
+        )
+
+        self.Outputs.network.send(table)
+        self._status_label.setText(f"Loaded {len(data)} interactions from file.")    
 
     # ---------------------------------------------------------------- callbacks
     def _on_query_done(self, edges):
@@ -409,6 +565,18 @@ class OWStringDB(OWWidget):
             self._worker.wait()
         super().onDeleteWidget()
 
+    def _on_source_changed(self):
+        self.data_source = "api" if self._api_radio.isChecked() else "file"
+
+        is_file = self.data_source == "file"
+
+        self._file_edit.setEnabled(is_file)
+        self._browse_btn.setEnabled(is_file)
+        self._fields_list.setEnabled(is_file)
+        self._strip_cb.setEnabled(is_file)
+
+        if is_file and self.file_path:
+            self._load_file_schema()
 
 # ---------------------------------------------------------------------------
 # Standalone test
