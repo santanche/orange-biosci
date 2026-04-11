@@ -131,6 +131,7 @@ class OWStringDB(OWWidget):
     # ------------------------------------------------------------------ msgs
     class Warning(OWWidget.Warning):
         no_genes = Msg("No valid gene IDs found in the selected column.")
+        limit_exceeded = Msg("STRING-DB API limits queries to 2,000 genes. The input has been truncated.")
 
     class Error(OWWidget.Error):
         api_error   = Msg("STRING-DB API error: {}")
@@ -336,6 +337,10 @@ class OWStringDB(OWWidget):
         if not genes:
             self.Warning.no_genes()
             return
+
+        if len(genes) > 2000:
+            self.Warning.limit_exceeded()
+            genes = genes[:2000]
 
         self._status_label.setText(
             f"Querying STRING-DB for {len(genes)} gene(s)…\n"
