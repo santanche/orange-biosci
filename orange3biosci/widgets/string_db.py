@@ -456,7 +456,7 @@ class OWStringDB(OWWidget):
         else:
             self._run_file_query(genes)
         
-    def _run_api_query(self, genes=None):
+    def _run_api_query(self, genes):
         if len(genes) > 2000:
             self.Warning.limit_exceeded()
             genes = genes[:2000]
@@ -467,49 +467,71 @@ class OWStringDB(OWWidget):
         self._worker.errored.connect(self._on_query_error)
         self._worker.start()
 
-    def _run_file_query(self, genes=None):
+    def _run_file_query(self, genes):
         path = self._resolve_path()
 
-        if not path or not os.path.exists(path):
-            self.Error.api_error("Invalid file path")
+        if not os.path.exists(path):
+            self.Error.api_error("File not found")
             return
 
-        header, rows = self._parse_string_file(path)
+        # Normalize gene list
+        genes_set = set(self._strip_protein(g) for g in genes)
 
-        selected = self._get_selected_fields()
-        if not selected:
-            selected = header  # fallback
+        with self._open_file(path) as f:
+            header = f.readline().strip().split()
 
-        # Build Orange domain dynamically
-        metas = []
-        for h in selected:
-            metas.append(Orange.data.StringVariable(h))
+            selected = [
+                item.text() for item in self._fields_list.selectedItems()
+            ] or header
 
-        domain = Orange.data.Domain([], metas=metas)
+            metas = [Orange.data.StringVariable(h) for h in selected]
+            domain = Orange.data.Domain([], metas=metas)
 
-        import numpy as np
+            import numpy as np
+            rows = []
 
-        data = []
-        for row in rows:
-            entry = []
-            for h in selected:
-                val = row[h]
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) != len(header):
+                    continue
 
-                if self.strip_protein_prefix and h in ("protein1", "protein2"):
-                    val = self._strip_protein(val)
+                row_dict = dict(zip(header, parts))
 
-                entry.append(val)
+                p1 = row_dict.get("protein1")
+                p2 = row_dict.get("protein2")
 
-            data.append(entry)
+                if not p1 or not p2:
+                    continue
+
+                # Normalize proteins
+                p1_clean = self._strip_protein(p1)
+                p2_clean = self._strip_protein(p2)
+
+                # FILTER CONDITION
+                if p1_clean not in genes_set and p2_clean not in genes_set:
+                    continue
+
+                entry = []
+                for h in selected:
+                    val = row_dict[h]
+
+                    if self.strip_protein_prefix and h in ("protein1", "protein2"):
+                        val = self._strip_protein(val)
+
+                    entry.append(val)
+
+                rows.append(entry)
 
         table = Orange.data.Table.from_numpy(
             domain,
-            X=np.empty((len(data), 0)),
-            metas=np.array(data, dtype=object),
+            X=np.empty((len(rows), 0)),
+            metas=np.array(rows, dtype=object),
         )
 
-        self.Outputs.network.send(table)
-        self._status_label.setText(f"Loaded {len(data)} interactions from file.")    
+        self._status_label.setText(
+            f"Loaded {len(rows)} filtered interactions (from {len(genes_set)} genes)"
+        )
+        self.Outputs.network.send(table)   
 
     # ---------------------------------------------------------------- callbacks
     def _on_query_done(self, edges):
