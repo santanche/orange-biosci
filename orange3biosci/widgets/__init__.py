@@ -15,7 +15,8 @@ WIDGETS = [
     'OWElementsPairing',
     'OWSimpleTransposeTable',
     'OWCustomPivot',
-    'OWListSplitter'
+    'OWListSplitter',
+    'OWStringDB'
 ]
 
 # The .py file where each widget is implemented
