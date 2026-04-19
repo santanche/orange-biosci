@@ -14,7 +14,7 @@ from AnyQt.QtWidgets import (
     QLabel, QComboBox, QVBoxLayout, QFormLayout,
     QSizePolicy, QApplication, QRadioButton,
     QHBoxLayout, QPushButton, QFileDialog,
-    QCheckBox, QListWidget
+    QCheckBox, QListWidget, QButtonGroup
 )
 
 from AnyQt.QtCore import Qt, QThread, pyqtSignal
@@ -120,6 +120,7 @@ class OWStringDB(OWWidget):
 
     class Outputs:
         network = Output("Network", Orange.data.Table, default=True)
+        unmatched = Output("Unmatched genes", Orange.data.Table)
 
     # ------------------------------------------------------------------ msgs
     class Warning(OWWidget.Warning):
@@ -140,6 +141,7 @@ class OWStringDB(OWWidget):
     data_source = settings.Setting("api")  # "api" | "file"
     file_path = settings.Setting("")
     path_mode = settings.Setting("absolute")  # "absolute" | "relative"
+    match_mode = settings.Setting("protein")  # "protein" | "gene"
     selected_fields = settings.Setting([])
     strip_protein_prefix = settings.Setting(False)
 
@@ -183,6 +185,9 @@ class OWStringDB(OWWidget):
         # --- Data source selector ---
         self._api_radio = QRadioButton("STRING API")
         self._file_radio = QRadioButton("Local file")
+        self._source_group = QButtonGroup(self)
+        self._source_group.addButton(self._api_radio)
+        self._source_group.addButton(self._file_radio)
 
         self._api_radio.setChecked(self.data_source == "api")
         self._file_radio.setChecked(self.data_source == "file")
@@ -201,7 +206,7 @@ class OWStringDB(OWWidget):
 
         def browse():
             path, _ = QFileDialog.getOpenFileName(
-                self, "Select STRING file", "", "STRING files (*.gz *.txt)"
+                self, "Select STRING file", "", "STRING files (*.gz *.txt, *.csv);;All files (*)"
             )
             if path:
                 self.file_path = path
@@ -228,6 +233,24 @@ class OWStringDB(OWWidget):
         # Fields selector (for file input) — user can pick which columns to import
         self._fields_list = QListWidget()
         self._fields_list.setSelectionMode(QListWidget.MultiSelection)
+
+        # Matching mode
+        self._protein_radio = QRadioButton("Protein IDs")
+        self._gene_radio = QRadioButton("Gene IDs")
+        self._match_group = QButtonGroup(self)
+        self._match_group.addButton(self._protein_radio)
+        self._match_group.addButton(self._gene_radio)
+
+        self._protein_radio.setChecked(self.match_mode == "protein")
+        self._gene_radio.setChecked(self.match_mode == "gene")
+
+        self._protein_radio.toggled.connect(self._on_match_mode_changed)
+
+        match_layout = QHBoxLayout()
+        match_layout.addWidget(self._protein_radio)
+        match_layout.addWidget(self._gene_radio)
+
+        form.addRow("Match by:", match_layout)
 
         form.addRow("Fields:", self._fields_list)
 
@@ -323,7 +346,11 @@ class OWStringDB(OWWidget):
     
     def _load_file_schema(self):
         path = self._resolve_path()
-        header, _ = self._parse_string_file(path)
+        if not os.path.exists(path):
+            return
+
+        with self._open_file(path) as f:
+            header = f.readline().strip().split(",")
 
         self._fields_list.clear()
         for h in header:
@@ -392,6 +419,9 @@ class OWStringDB(OWWidget):
         )
 
     # ---------------------------------------------------------------- combo slots
+    def _on_match_mode_changed(self):
+        self.match_mode = "protein" if self._protein_radio.isChecked() else "gene"
+    
     def _on_col_changed(self, idx):
         if idx >= 0:
             self.gene_col_name = self._col_cb.itemData(idx)
@@ -449,7 +479,7 @@ class OWStringDB(OWWidget):
             f"Network: {self.network_type} | "
             f"Taxon: {self.species_taxid}"
         )
-        self._query_btn.setEnabled(False)
+        # self._query_btn.setEnabled(False)
 
         if self.data_source == "api":
             self._run_api_query(genes)
@@ -461,25 +491,46 @@ class OWStringDB(OWWidget):
             self.Warning.limit_exceeded()
             genes = genes[:2000]
 
+        self._last_genes = genes
+
         # --- start background worker ------------------------------------
         self._worker = _Worker(genes, self.species_taxid, self.network_type)
         self._worker.finished.connect(self._on_query_done)
         self._worker.errored.connect(self._on_query_error)
         self._worker.start()
 
-    def _run_file_query(self, genes):
+    def _run_file_query(self, inputs):
         path = self._resolve_path()
 
         if not os.path.exists(path):
             self.Error.api_error("File not found")
             return
 
-        # Normalize gene list
-        genes_set = set(self._strip_protein(g) for g in genes)
+        # Normalize input set
+        input_set = set(str(x).strip() for x in inputs if str(x).strip())
+
+        if not input_set:
+            self.Error.api_error("Empty input list")
+            return
+
+        # Select matching columns
+        if self.match_mode == "protein":
+            colA, colB = "protein1", "protein2"
+        else:
+            colA, colB = "gene1_id", "gene2_id"
+
+        matched = set()
 
         with self._open_file(path) as f:
-            header = f.readline().strip().split()
+            header = f.readline().strip().split(",")
 
+            # Validate required columns
+            required = {"protein1", "protein2", "gene1_id", "gene2_id"}
+            if not required.issubset(set(header)):
+                self.Error.api_error("Invalid file schema: missing required columns")
+                return
+
+            # Selected output fields
             selected = [
                 item.text() for item in self._fields_list.selectedItems()
             ] or header
@@ -489,90 +540,170 @@ class OWStringDB(OWWidget):
 
             import numpy as np
             rows = []
+            edge_exists = {}
 
             for line in f:
-                parts = line.strip().split()
+                parts = line.strip().split(",")
                 if len(parts) != len(header):
                     continue
 
                 row_dict = dict(zip(header, parts))
 
-                p1 = row_dict.get("protein1")
-                p2 = row_dict.get("protein2")
+                v1 = row_dict.get(colA)
+                v2 = row_dict.get(colB)
 
-                if not p1 or not p2:
+                if ((v1, v2) in edge_exists) or ((v2, v1) in edge_exists):
+                    continue  # skip duplicates
+                edge_exists[(v1, v2)] = True
+
+                if not v1 or not v2:
                     continue
 
-                # Normalize proteins
-                p1_clean = self._strip_protein(p1)
-                p2_clean = self._strip_protein(p2)
-
-                # FILTER CONDITION
-                if p1_clean not in genes_set and p2_clean not in genes_set:
+                # FILTER condition
+                if v1 not in input_set or v2 not in input_set:
                     continue
 
-                entry = []
-                for h in selected:
-                    val = row_dict[h]
+                # Track matches
+                if (v1 in input_set) and (v2 in input_set):
+                    matched.add(v1)
+                    matched.add(v2)
 
-                    if self.strip_protein_prefix and h in ("protein1", "protein2"):
-                        val = self._strip_protein(val)
-
-                    entry.append(val)
-
+                # Build row
+                entry = [row_dict[h] for h in selected]
                 rows.append(entry)
 
+        # --------------------------
+        # Output: Network
+        # --------------------------
         table = Orange.data.Table.from_numpy(
             domain,
             X=np.empty((len(rows), 0)),
             metas=np.array(rows, dtype=object),
         )
 
-        self._status_label.setText(
-            f"Loaded {len(rows)} filtered interactions (from {len(genes_set)} genes)"
+        self.Outputs.network.send(table)
+
+        # --------------------------
+        # Output: Unmatched
+        # --------------------------
+        unmatched = input_set - matched
+
+        unmatched_table = Orange.data.Table.from_numpy(
+            Orange.data.Domain([], metas=[Orange.data.StringVariable("ID")]),
+            X=np.empty((len(unmatched), 0)),
+            metas=np.array([[x] for x in sorted(unmatched)], dtype=object),
         )
-        self.Outputs.network.send(table)   
+
+        self.Outputs.unmatched.send(unmatched_table)
+
+        # --------------------------
+        # Status
+        # --------------------------
+        self._status_label.setText(
+            f"{len(rows)} edges | matched {len(matched)} | unmatched {len(unmatched)}"
+        )
+
+        # --------------------------
+        # Build main network output
+        # --------------------------
+        table = Orange.data.Table.from_numpy(
+            domain,
+            X=np.empty((len(rows), 0)),
+            metas=np.array(rows, dtype=object),
+        )
+
+        self.Outputs.network.send(table)
+
+        # --------------------------
+        # Build unmatched genes output
+        # --------------------------
+        unmatched_genes = input_set - matched
+
+        unmatched_list = [[g] for g in sorted(unmatched_genes)]
+
+        unmatched_domain = Orange.data.Domain(
+            [],
+            metas=[Orange.data.StringVariable("Gene")],
+        )
+
+        unmatched_table = Orange.data.Table.from_numpy(
+            unmatched_domain,
+            X=np.empty((len(unmatched_list), 0)),
+            metas=np.array(unmatched_list, dtype=object),
+        )
+
+        self.Outputs.unmatched.send(unmatched_table)
+
+        # --------------------------
+        # Status
+        # --------------------------
+        self._status_label.setText(
+            f"Loaded {len(rows)} edges | "
+            f"Matched: {len(matched)} | "
+            f"Unmatched: {len(unmatched_genes)}"
+        )
 
     # ---------------------------------------------------------------- callbacks
     def _on_query_done(self, edges):
-        self._query_btn.setEnabled(True)
+        import numpy as np
 
-        if not edges:
-            self._status_label.setText("Query complete — no interactions found.")
-            self.Outputs.network.send(None)
-            return
-
-        # Build Orange Table: source_name, target_name, combined_score
         domain = Orange.data.Domain(
             [],
             metas=[
-                Orange.data.StringVariable("Source"),
-                Orange.data.StringVariable("Target"),
-                Orange.data.ContinuousVariable("Score"),
+                Orange.data.StringVariable("protein1"),
+                Orange.data.StringVariable("protein2"),
+                Orange.data.StringVariable("gene1_symbol"),
+                Orange.data.StringVariable("gene2_symbol"),
+                Orange.data.ContinuousVariable("experimental"),
+                Orange.data.ContinuousVariable("database"),
+                Orange.data.ContinuousVariable("textmining"),
+                Orange.data.ContinuousVariable("combined_score"),
             ],
         )
 
         metas = []
-        for edge in edges:
-            src   = edge.get("preferredName_A", edge.get("stringId_A", ""))
-            tgt   = edge.get("preferredName_B", edge.get("stringId_B", ""))
-            score = float(edge.get("score", edge.get("escore", 0)))
-            metas.append([src, tgt, score])
+        matched = set()
 
-        import numpy as np
+        for e in edges:
+            protein1 = e.get("stringId_A", "")
+            protein2 = e.get("stringId_B", "")
+
+            gene1 = e.get("preferredName_A", "")
+            gene2 = e.get("preferredName_B", "")
+
+            experimental = e.get("escore", 0)
+            database = e.get("dscore", 0)
+            textmining = e.get("tscore", 0)
+            combined_score = e.get("score", 0)
+
+            metas.append([protein1, protein2, gene1, gene2, float(experimental), float(database), float(textmining), float(combined_score)])
+
+            matched.add(gene1)
+            matched.add(gene2)
+
         table = Orange.data.Table.from_numpy(
             domain,
-            X     = np.empty((len(metas), 0)),
-            metas = np.array(metas, dtype=object),
+            X=np.empty((len(metas), 0)),
+            metas=np.array(metas, dtype=object),
         )
 
-        self._status_label.setText(
-            f"Done!  {len(edges)} interaction(s) found for "
-            f"{len(set([e.get('preferredName_A','') for e in edges] + [e.get('preferredName_B','') for e in edges]))} "
-            f"unique proteins.\n\n"
-            f"Output columns: Source | Target | Score (0–1)"
-        )
         self.Outputs.network.send(table)
+
+        # ---- unmatched ----
+        input_genes = set(self._last_genes)  # store earlier
+        unmatched = input_genes - matched
+
+        unmatched_table = Orange.data.Table.from_numpy(
+            Orange.data.Domain([], metas=[Orange.data.StringVariable("Gene")]),
+            X=np.empty((len(unmatched), 0)),
+            metas=np.array([[g] for g in unmatched], dtype=object),
+        )
+
+        self.Outputs.unmatched.send(unmatched_table)
+
+        self._status_label.setText(
+            f"{len(edges)} edges | matched {len(matched)} | unmatched {len(unmatched)}"
+        )
 
     def _on_query_error(self, msg):
         self._query_btn.setEnabled(True)
