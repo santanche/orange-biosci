@@ -6,6 +6,8 @@ Orange3 Widget — STRING-DB Gene Network Query
 import sys
 import os
 import gzip
+import zipfile
+import io
 
 import requests
 from importlib.resources import files
@@ -201,16 +203,21 @@ class OWStringDB(OWWidget):
         form.addRow("Data source:", src_layout)
 
         # --- File selector (shown only if "Local file" is selected) ---
-        self._file_edit = gui.lineEdit(self.controlArea, self, "file_path")
+        self._file_edit = gui.lineEdit(self.controlArea, self, "file_path", callback=self._load_file_schema)
         self._browse_btn = QPushButton("Browse")
 
         def browse():
             path, _ = QFileDialog.getOpenFileName(
-                self, "Select STRING file", "", "STRING files (*.gz *.txt, *.csv);;All files (*)"
+                self, "Select STRING file", "", "STRING files (*.gz *.zip *.txt *.csv);;All files (*)"
             )
             if path:
+                if self.path_mode == "relative":
+                    workflow_dir = self.workflowEnv().get("basedir", "")
+                    if workflow_dir:
+                        path = os.path.relpath(path, workflow_dir)
                 self.file_path = path
                 self._file_edit.setText(path)
+                self._load_file_schema()
 
         self._browse_btn.clicked.connect(browse)
 
@@ -224,9 +231,19 @@ class OWStringDB(OWWidget):
         self._path_cb = QComboBox()
         self._path_cb.addItems(["Absolute", "Relative to workflow"])
         self._path_cb.setCurrentIndex(0 if self.path_mode == "absolute" else 1)
-        self._path_cb.currentIndexChanged.connect(
-            lambda i: setattr(self, "path_mode", "absolute" if i == 0 else "relative")
-        )
+        
+        def _on_path_mode_changed(i):
+            self.path_mode = "absolute" if i == 0 else "relative"
+            if self.file_path:
+                workflow_dir = self.workflowEnv().get("basedir", "")
+                if workflow_dir:
+                    if self.path_mode == "relative" and os.path.isabs(self.file_path):
+                        self.file_path = os.path.relpath(self.file_path, workflow_dir)
+                    elif self.path_mode == "absolute" and not os.path.isabs(self.file_path):
+                        self.file_path = os.path.abspath(os.path.join(workflow_dir, self.file_path))
+                    self._file_edit.setText(self.file_path)
+
+        self._path_cb.currentIndexChanged.connect(_on_path_mode_changed)
 
         form.addRow("Path mode:", self._path_cb)
 
@@ -321,6 +338,9 @@ class OWStringDB(OWWidget):
         path = self.file_path
         if self.path_mode == "relative":
             # relative to workflow (Orange stores cwd as workflow dir)
+            workflow_dir = self.workflowEnv().get("basedir", "")
+            if workflow_dir and not os.path.isabs(path):
+                return os.path.join(workflow_dir, path)
             return os.path.abspath(path)
         return path
     
@@ -328,7 +348,13 @@ class OWStringDB(OWWidget):
     def _open_file(self, path):
         if path.endswith(".gz"):
             return gzip.open(path, "rt")
-        return open(path, "r")
+        elif path.endswith(".zip"):
+            z = zipfile.ZipFile(path)
+            names = z.namelist()
+            if not names:
+                raise ValueError("Zip file is empty")
+            return io.TextIOWrapper(z.open(names[0], "r"), encoding="utf-8")
+        return open(path, "r", encoding="utf-8")
     
     # helper to parse STRING-DB space-delimited files
     def _parse_string_file(self, path):
@@ -367,6 +393,10 @@ class OWStringDB(OWWidget):
             return pid
 
     # ---------------------------------------------------------------- input handler
+    def handleNewSignals(self):
+        if self._data is not None:
+            self._run_query()
+
     @Inputs.data
     def set_data(self, data):
         self.Error.no_data.clear()
@@ -535,7 +565,14 @@ class OWStringDB(OWWidget):
                 item.text() for item in self._fields_list.selectedItems()
             ] or header
 
-            metas = [Orange.data.StringVariable(h) for h in selected]
+            numeric_fields = {"neighborhood", "fusion", "cooccurence", "coexpression", "experimental", "database", "textmining", "combined_score"}
+            metas = []
+            for h in selected:
+                if h in numeric_fields:
+                    metas.append(Orange.data.ContinuousVariable(h))
+                else:
+                    metas.append(Orange.data.StringVariable(h))
+
             domain = Orange.data.Domain([], metas=metas)
 
             import numpy as np
@@ -569,7 +606,15 @@ class OWStringDB(OWWidget):
                     matched.add(v2)
 
                 # Build row
-                entry = [row_dict[h] for h in selected]
+                entry = []
+                for h in selected:
+                    val = row_dict[h]
+                    if h in numeric_fields:
+                        try:
+                            val = float(val) / 1000.0
+                        except ValueError:
+                            val = float('nan')
+                    entry.append(val)
                 rows.append(entry)
 
         # --------------------------
