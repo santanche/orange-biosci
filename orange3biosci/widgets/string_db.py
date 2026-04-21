@@ -144,8 +144,8 @@ class OWStringDB(OWWidget):
     file_path = settings.Setting("")
     path_mode = settings.Setting("absolute")  # "absolute" | "relative"
     match_mode = settings.Setting("protein")  # "protein" | "gene"
-    selected_fields = settings.Setting([])
     strip_protein_prefix = settings.Setting(False)
+    auto_query = settings.Setting(False)
 
     # ---------------------------------------------------------------- species catalogue
     # (taxid, display name) — extend freely
@@ -203,7 +203,7 @@ class OWStringDB(OWWidget):
         form.addRow("Data source:", src_layout)
 
         # --- File selector (shown only if "Local file" is selected) ---
-        self._file_edit = gui.lineEdit(self.controlArea, self, "file_path", callback=self._load_file_schema)
+        self._file_edit = gui.lineEdit(self.controlArea, self, "file_path", callback=self.commit)
         self._browse_btn = QPushButton("Browse")
 
         def browse():
@@ -217,7 +217,7 @@ class OWStringDB(OWWidget):
                         path = os.path.relpath(path, workflow_dir)
                 self.file_path = path
                 self._file_edit.setText(path)
-                self._load_file_schema()
+                self.commit()
 
         self._browse_btn.clicked.connect(browse)
 
@@ -242,14 +242,11 @@ class OWStringDB(OWWidget):
                     elif self.path_mode == "absolute" and not os.path.isabs(self.file_path):
                         self.file_path = os.path.abspath(os.path.join(workflow_dir, self.file_path))
                     self._file_edit.setText(self.file_path)
+            self.commit()
 
         self._path_cb.currentIndexChanged.connect(_on_path_mode_changed)
 
         form.addRow("Path mode:", self._path_cb)
-
-        # Fields selector (for file input) — user can pick which columns to import
-        self._fields_list = QListWidget()
-        self._fields_list.setSelectionMode(QListWidget.MultiSelection)
 
         # Matching mode
         self._protein_radio = QRadioButton("Protein IDs")
@@ -269,8 +266,6 @@ class OWStringDB(OWWidget):
 
         form.addRow("Match by:", match_layout)
 
-        form.addRow("Fields:", self._fields_list)
-
         # Gene column selector
         self._col_cb = QComboBox()
         self._col_cb.setMinimumWidth(160)
@@ -279,9 +274,10 @@ class OWStringDB(OWWidget):
 
         self._strip_cb = QCheckBox("Extract only protein_id (remove Taxon.ENSP...)")
         self._strip_cb.setChecked(self.strip_protein_prefix)
-        self._strip_cb.stateChanged.connect(
-            lambda s: setattr(self, "strip_protein_prefix", bool(s))
-        )
+        def _on_strip_changed(s):
+            self.strip_protein_prefix = bool(s)
+            self.commit()
+        self._strip_cb.stateChanged.connect(_on_strip_changed)
 
         form.addRow("", self._strip_cb)
 
@@ -311,12 +307,17 @@ class OWStringDB(OWWidget):
 
         gui.separator(self.controlArea)
 
-        # Query button
+        # Query button and Auto Query
+        box = gui.hBox(self.controlArea)
         self._query_btn = gui.button(
-            self.controlArea, self, "Query STRING-DB",
+            box, self, "Query STRING-DB",
             callback=self._run_query,
         )
         self._query_btn.setEnabled(False)
+        self._auto_query_cb = gui.checkBox(
+            box, self, "auto_query", "Query Automatically",
+            callback=self._on_auto_query_changed
+        )
 
         gui.rubber(self.controlArea)
 
@@ -370,21 +371,6 @@ class OWStringDB(OWWidget):
 
         return header, rows
     
-    def _load_file_schema(self):
-        path = self._resolve_path()
-        if not os.path.exists(path):
-            return
-
-        with self._open_file(path) as f:
-            header = f.readline().strip().split(",")
-
-        self._fields_list.clear()
-        for h in header:
-            self._fields_list.addItem(h)
-
-    def _get_selected_fields(self):
-        return [item.text() for item in self._fields_list.selectedItems()]
-    
     def _strip_protein(self, pid):
         # 9606.ENSP00000000233 → 233
         try:
@@ -395,7 +381,7 @@ class OWStringDB(OWWidget):
     # ---------------------------------------------------------------- input handler
     def handleNewSignals(self):
         if self._data is not None:
-            self._run_query()
+            self.commit()
 
     @Inputs.data
     def set_data(self, data):
@@ -451,18 +437,30 @@ class OWStringDB(OWWidget):
     # ---------------------------------------------------------------- combo slots
     def _on_match_mode_changed(self):
         self.match_mode = "protein" if self._protein_radio.isChecked() else "gene"
+        self.commit()
     
     def _on_col_changed(self, idx):
         if idx >= 0:
             self.gene_col_name = self._col_cb.itemData(idx)
+            self.commit()
 
     def _on_net_changed(self, idx):
         if idx >= 0:
             self.network_type = self._net_cb.itemData(idx)
+            self.commit()
 
     def _on_species_changed(self, idx):
         if idx >= 0:
             self.species_taxid = self._sp_cb.itemData(idx)
+            self.commit()
+
+    def commit(self):
+        if self.auto_query:
+            self._run_query()
+
+    def _on_auto_query_changed(self):
+        if self.auto_query:
+            self._run_query()
 
     # ---------------------------------------------------------------- query
     def _run_query(self):
@@ -561,9 +559,7 @@ class OWStringDB(OWWidget):
                 return
 
             # Selected output fields
-            selected = [
-                item.text() for item in self._fields_list.selectedItems()
-            ] or header
+            selected = header
 
             numeric_fields = {"neighborhood", "fusion", "cooccurence", "coexpression", "experimental", "database", "textmining", "combined_score"}
             metas = []
@@ -770,11 +766,9 @@ class OWStringDB(OWWidget):
 
         self._file_edit.setEnabled(is_file)
         self._browse_btn.setEnabled(is_file)
-        self._fields_list.setEnabled(is_file)
         self._strip_cb.setEnabled(is_file)
 
-        if is_file and self.file_path:
-            self._load_file_schema()
+        self.commit()
 
 # ---------------------------------------------------------------------------
 # Standalone test
