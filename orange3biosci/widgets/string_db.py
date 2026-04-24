@@ -114,7 +114,8 @@ class OWStringDB(OWWidget):
     priority    = 100
     keywords    = ["string", "stringdb", "gene", "network", "interaction", "PPI"]
 
-    want_main_area = True
+    want_main_area = False
+    resizing_enabled = False
 
     # ------------------------------------------------------------------ I/O
     class Inputs:
@@ -319,9 +320,9 @@ class OWStringDB(OWWidget):
             callback=self._on_auto_query_changed
         )
 
-        gui.rubber(self.controlArea)
+        gui.separator(self.controlArea)
 
-        # ---- Main area (status / summary) --------------------------------
+        # ---- Status / summary --------------------------------
         self._status_label = QLabel(
             "Connect a data table to get started.\n\n"
             "The widget will query STRING-DB and output\n"
@@ -330,7 +331,11 @@ class OWStringDB(OWWidget):
         self._status_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._status_label.setWordWrap(True)
         self._status_label.setStyleSheet("padding: 12px; font-size: 13px;")
-        self.mainArea.layout().addWidget(self._status_label)
+        self.controlArea.layout().addWidget(self._status_label)
+
+        gui.rubber(self.controlArea)
+
+        self.adjustSize()
 
         self._on_source_changed()
 
