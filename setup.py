@@ -2,10 +2,10 @@
 from setuptools import setup, find_packages
 
 NAME = 'orange-biosci'
-VERSION = '0.1.1'
+VERSION = '0.8.3'
 DESCRIPTION = 'Custom Orange Bio Sci Widgets'
 AUTHOR = 'André Santanchè'
-URL = 'https://github.com/santanche/orange-biosci'
+URL = 'https://github.com/datasci4health/orange-biosci'
 LICENSE = 'LGPL-2.1-or-later'
 
 setup(
@@ -22,17 +22,17 @@ setup(
     },
     include_package_data=True,
     entry_points={
-        # This is the crucial part that tells Orange about your widgets
         'orange3.addon': (
-            'mywidgets = orange3biosci',  # Replace 'orange3biosci' with your package name
+            'mywidgets = orange3biosci',
         ),
         'orange.widgets': (
-            # Point to your widget category definition
             'My Custom Widgets = orange3biosci.widgets',
         ),
     },
     install_requires=[
-        'orange3>=3.32.0',  # Specify Orange version requirement
+        'orange3>=3.32.0',
+        "pandas",
+        "numpy"
     ],
     classifiers=[
         'Development Status :: 4 - Beta',

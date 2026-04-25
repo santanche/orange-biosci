@@ -7,7 +7,7 @@ pip install build twine
 
 # Build the package
 ~~~bash
-python -m build
+python3 -m build
 ~~~
 
 # Upload to PyPI (for real)

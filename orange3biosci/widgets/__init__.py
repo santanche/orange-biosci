@@ -9,7 +9,6 @@ BACKGROUND = "#9FFFBD"
 PRIORITY = 3
 
 WIDGETS = [
-    # The class name and a friendly name for its menu entry
     'OWGeoPreprocessor',
     'OWGeoSoftExtractor',
     'OWElementsPairing',

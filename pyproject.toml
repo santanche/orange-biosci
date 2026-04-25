@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orange-biosci"
-version = "0.8.2"
+version = "0.8.3"
 description = "Custom Orange Bio Sci Widgets"
 authors = [
     {name = "André Santanchè"}
@@ -19,6 +19,11 @@ classifiers = [
         'Topic :: Scientific/Engineering :: Visualization',
         'Topic :: Scientific/Engineering :: Information Analysis',
 ]
+dependencies = [
+    "Orange3>=3.32.0",
+    "pandas",
+    "numpy"
+]
 
 [project.urls]
-Homepage = "https://github.com/santanche/orange-biosci"
+Homepage = "https://github.com/datasci4health/orange-biosci"
